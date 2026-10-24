@@ -1,66 +1,73 @@
-# CivicSignal: 2-minute pitch
+# CivicSignal: 2-minute video script and shot list
 
-All numbers come from `results/compare.md` (3 seeds, all reported) or from the preset runs noted below.
+All numbers come from `results/compare_midtown.md` (3 seeds, 40-minute rush hour, every seed reported).
+Record each shot separately, then cut them together. Retakes are free, and nothing has to work live.
 
-## Before you go on
+## Setup (once)
 
-1. `python server.py`, then open <http://localhost:8000> in Chrome, full screen (⌃⌘F).
-2. Set speed to 10× and press Space. At about **9:00** sim time, press Space to pause and set speed to **1×**.
-3. In a second tab, open the backup: <http://localhost:8000/?replay=/recordings/demo.jsonl&t=540>
-4. Close Docker, Slack, and extra tabs. Check Activity Monitor: memory pressure should be green.
+1. `python server.py`, then open <http://localhost:8000> in Chrome. Hide the bookmarks bar and full-screen the
+   window (⌃⌘F). 1440×900 or 1512×982 looks right.
+2. Record with ⌘⇧5 → "Record selected portion" over the browser, or QuickTime. Turn on "show mouse clicks".
+3. To jump to rush hour for any shot: set speed to 10×, press Space, and pause (Space) at about 9:00 sim time.
+   Then set 1× or 2× before recording.
+4. Close Slack, Docker and extra tabs. Four Manhattans at once is the heaviest view.
 
-If the live sim misbehaves, switch tabs to the replay and keep talking. It plays the same story, with the
-ambulance dispatched at 15:50.
+## Shots
 
-## Script (about 2:00)
+**1. Hook (0:00–0:15).** *Compare: All four strategies, paused at about 9:30, Impact tab.*
+> "These are 54 real traffic lights in Midtown Manhattan, 6th to 3rd Avenue. NYC already watches these blocks with
+> sensors, and engineers retime them from a control room. We asked: what if every light decided for itself every
+> second, by priorities the city sets in public?"
 
-**Hook (0:00–0:15)**
-"Every red light over an empty intersection costs you time and burns fuel while you idle. Many signals still run
-on fixed timers. They don't know whether anyone is waiting."
+**2. Four cities, same traffic (0:15–0:40).** *Press Space at 2×. Let rush hour build. Press H for the heatmap.*
+> "Same cars, same second, four ways to run the lights: today's fixed timers, detector-actuated lights, a coordinated
+> green wave, and CivicSignal. Watch fixed-time back up and glow with exhaust." *Point at the Impact table as stars
+> move to CivicSignal.*
 
-**Side by side (0:15–0:45)** *Press Space. Rush hour starts at 10:00.*
-"Same nine intersections, same cars, same random seed. Left: today's fixed timer. Right: CivicSignal. Every light
-reads its queues (data loop detectors and cameras already collect) and gives green where the pressure is highest.
-Watch the left side back up as rush hour hits." *Point at the cards:* "Average delay is down by more than half, and so
-is the wasted idling CO₂."
+**3. Ambulance race (0:40–1:00).** *Events tab → 🚑 Dispatch ambulance (or press A). Keep 1× so the race is readable.*
+> "An ambulance heads for Mount Sinai West, same route in all four cities. CivicSignal sees it coming and turns
+> every light on its route green early enough to flush the queue, and it never skips a yellow." *Wait for the race
+> bars to finish.* "Across 15 dispatches: 2:38 with CivicSignal, 4:15 with the best alternative, over 9 minutes on
+> fixed timers."
 
-**Ambulance (0:45–1:10)** *Press A at about 11:00 to 12:00 sim time.*
-"Same ambulance, same route, same second, in both cities. On the right, every light ahead on its route turns green
-early enough to flush its queue. It never skips a yellow." *Wait for both arrival toasts (about 13 s at 1×).*
-"Across 15 dispatches: **78 seconds with CivicSignal, 126 with fixed timers.** And fixed timers are a lottery:
-anywhere from 83 to 235 seconds."
+**4. Chaos (1:00–1:15).** *Press S (Radio City surge), then C (crash at St. Patrick's).*
+> "A Radio City show lets out, and a crash blocks two lanes of 5th Avenue. Fixed timers just keep counting.
+> CivicSignal reroutes green time to where the queues are."
 
-**Civics (1:10–1:40)**
-"Cities shouldn't get a black box. These sliders are the city's values, written into the controller."
-*Click **Climate**:* "Climate keeps moving platoons moving, because a restart burns far more fuel than idling. In our
-runs that's 10% less CO₂ and a third fewer stops, on top of the gains you just saw." *Click **Fairness**:*
-"Fairness caps the longest wait. Watch 'Longest wait right now'. In our runs it cuts the
-typical longest wait by 40%." *Click **Transit**:* "Transit puts buses first: 24 to 30% less bus waiting, with no
-cost to everyone else."
-"Every decision is a formula you can read and audit. The city chooses its values; the lights carry them out."
+**5. The city steers (1:15–1:40).** *Policy tab. Type into the copilot:* "Radio City lets out at 10pm. Keep 6th Ave
+moving, protect the buses, and don't let side streets wait forever." *→ Ask copilot → Apply policy.*
+*Then click any intersection on the CivicSignal map → Inspect tab.*
+> "Cities shouldn't get a black box. An official writes the goal in plain English, and the copilot only sets four
+> public dials. The lights still run on one auditable formula. Click any intersection and you see exactly why it's
+> green: queue pressure, platoons, buses, waiting time."
 
-**Results (1:40–2:00)**
-"Three seeds, all reported: **−62% delay, −63% idling CO₂, −9% total CO₂, and the ambulance arrives 47 seconds
-sooner**, with the same throughput and zero gridlock. It runs on detectors cities already own and on a small box
-in the signal cabinet."
+**6. Results (1:40–2:00).** *Impact tab, all four strategies, late in the run. Or cut to the README results table.*
+> "Over three full rush hours, CivicSignal beats the best of today's methods on 8 of 11 measures: 4% less delay,
+> 8% less CO₂, fuel and smog, and 38% faster ambulances. Against fixed timers: 83% less delay and 44% less CO₂.
+> The green wave still wins on stops and buses, and we show that too. CivicSignal: traffic lights the city can steer."
+
+## If you're short on time
+
+Use only shots 2, 3 and 6, in Fixed-time vs CivicSignal mode, which runs the lightest.
 
 ## Judge Q&A
 
-- **Is the baseline a strawman?** It's SUMO's default fixed-time program: a 90 s cycle with an even split, the most
-  common real-world setup. We haven't benchmarked against actuated control, and we say so.
-- **Why max-pressure, not RL?** It needs no training data and has throughput-optimality results in the literature
-  (Varaiya 2013). Every decision is auditable: it's one line of arithmetic per light. That's the civics point.
-- **Downsides?** With default weights, cars stop more often (+24% stops per vehicle) but for much less time: time
-  loss is −41%. The Climate slider fixes that: stops drop below fixed-time (1.15 vs 1.61) and total CO₂ falls another
-  10%. Our first climate formula (weighting idling CO₂) made CO₂ *worse* by 3%. We measured it, threw it out, and
-  rebuilt it around stops.
-- **Does it only work on your demand?** Gains are biggest when demand is uneven (here, rush hour on one axis at 3× the
-  cross streets). That's the normal case downtown. Under perfectly uniform demand a good fixed timer is hard to beat.
-- **Deployment?** Queue counts come from existing loop detectors or cameras, and the controller runs on an edge box in
-  the cabinet. Min-green (8 s), max-green (60 s), yellow (3 s), and all-red (1 s) bounds keep it safe.
-  Emergency vehicles would broadcast their approach, which is how today's preemption systems work.
-- **Is the ambulance demo cherry-picked?** No. The table averages 5 dispatch times × 3 seeds. The recorded demo uses
-  a dispatch where the fixed-time trip (126 s) is near its median, not the worst case.
+- **Is the baseline a strawman?** We tested against three: SUMO's fixed-time program, detector-actuated control
+  (gap-out, 6–55 s greens), and a green wave with avenue-weighted splits and travel-time offsets. Actuated is strong:
+  it beats us on delay on the 3×3 demo grid (7.2 s vs 11.7 s), and we say so.
+- **Why max-pressure, not RL?** It needs no training data and has throughput-optimality results (Varaiya 2013).
+  Every decision is one line of arithmetic per light, which is the civics point.
+- **Where do you lose?** The green wave has fewer stops (2.16 vs 2.68 per vehicle) and faster buses (84 vs 101 s) on
+  Manhattan's avenues. The Climate and Transit dials narrow that gap when the city wants them to.
+- **What was hard?** Real map data. OpenStreetMap splits some approaches into 12 m segments, so a light only saw the
+  last car or two and starved Madison Ave. We added advance detection: each light counts its whole approach, like
+  real loop detectors. That took one seed from 38 s to 25 s of delay.
+- **Deployment?** Queue counts come from detectors and cameras NYC already has in this zone ("Midtown in Motion",
+  2011: microwave sensors, cameras and E-ZPass readers, with timing adjusted remotely, and DOT reported 10% faster
+  travel). CivicSignal runs per intersection on a cabinet computer, with min-green, max-green, yellow and all-red
+  bounds for safety.
+- **Is the ambulance cherry-picked?** No. Five dispatch times per run × three seeds, all averaged and all listed in
+  `results/compare_midtown.md`.
 
-Preset numbers (Fairness, Transit) come from full-length runs on seeds 1 and 2, compared against the default
-weights.
+Sources for the NYC facts: NYC DOT press release (2012),
+<https://www.nyc.gov/html/dot/html/pr2012/pr12_25.shtml>; ITS JPO summary, <https://www.itskrs.its.dot.gov/2012-l00639>.

@@ -322,30 +322,42 @@ slides, presenting while the builder drives the demo). Nothing on the build path
   and `python server.py --record recordings/demo.jsonl`, then commit the refreshed `results/` and recording.
 
 **Contract changes since the freeze.** These are additive only, so old callers still work. Keep it that way.
-- `LaneObs.approaching: int = 0`: the count of moving vehicles on the lane. It feeds the climate term.
-- Server → browser also sends `{"type":"state",...}` (weights, playing, sps) and `{"type":"history","points":[...]}`
-  (chart backfill for a reloaded page). Unknown types are ignored.
+- `LaneObs.approaching` (moving vehicles on the lane) and `LaneObs.buses_moving` (moving buses), both defaulted.
+- `SumoRunner(..., program="0")`: the SUMO program for controller-less runs (`"0"` fixed, `"actuated"`, `"greenwave"`).
+  New methods: `surge()`, `crash()`, `inspect(tls_id)`.
+- Frame `m` gains cumulative `halt_vs, veh_s, stops, fuel_l, nox_g, pm_g, bus_trips, bus_avg_trip_s`. A frame may carry
+  `heat` ({edge: CO₂ g/s per 100 m}). `sims` is keyed by strategy (`fixed|actuated|greenwave|adaptive`), with 2 or 4 panes.
+- Server → browser: `state` (weights, panes, scenarios, copilot availability, inspected light), `history` (chart
+  backfill), and `frame.inspect`. Browser → server: `event` {ambulance|surge|crash}, `inspect` {tls}, and `config`
+  {scenario, panes}. `POST /api/copilot` turns plain English into weights via Gemini (key read from `.env`).
+- One sim loop broadcasts to every connected window. Windows share the sim, so a test driver must use its own
+  port (`python server.py --port 8010`).
 
 **Deliberate deviations from section 5. Don't "fix" these back.**
+- Maps live in `scenario/<id>/` with `meta.json`, built by `python scenario/build.py`. Midtown is the 54-signal OSM
+  import (6th–3rd Ave, 47th–55th St). The grid is kept as the demo city.
 - 5.2: use `trafficlight.getAllProgramLogics`. In traci 1.28 `getCompleteRedYellowGreenDefinition` is the deprecated
-  alias, despite what its warning text says.
-- 5.3 preemption: the range is 300 m, and the runner gives every light ahead on the ambulance's route its distance
-  along the route (`vehicle.getNextTLS`). At 150 m, with only the current lane checked, the ambulance got stuck
-  behind queues that had stopped at the red.
-- 5.3 climate term: `climate · (moving vehicles on the in-lane)` instead of idle CO₂. The spec's version measured
-  +3% total CO₂. This one measured −10% total CO₂, −37% stops, and −14% delay (seeds 1–2, climate 2.5).
-  The constants are `CLIMATE_IDLE_K` and `CLIMATE_STOP_K` in `core/controller.py`.
-- 5.4: the ambulance metric is the mean of 5 rush-hour dispatches (700…1500 s). A single dispatch is a coin flip
-  on the fixed-time phase.
-- 5.6: Chart.js is vendored in `web/vendor/` so the demo works offline. The layout puts the cards beside the maps.
-- Cut: `web/mock_frames.json`, the city report card, the actuated baseline, OSM/Amherst, and Plan B.
+  alias. Teleporting vehicles report sentinel emissions of about −1e9 and are skipped.
+- 5.2 advance detection: segments chained to a signal's approach (through non-signal nodes, up to 250 m) report into
+  that approach's `LaneObs`. Without it, Midtown seed 2 delay was 38 s instead of 25 s (OSM splits Madison Ave).
+- 5.3 preemption: the range is 300 m, and every light on the ambulance's route gets its distance (`getNextTLS`).
+- 5.3 climate term: `climate · (moving vehicles on the approach)` instead of idle CO₂. The spec's version measured
+  +3% CO₂. Transit counts approaching buses too (transit signal priority).
+- CivicSignal's default policy is `BALANCED` in `core/controller.py` (flow 1, climate 1, transit 0.5). The `Weights`
+  dataclass defaults are unchanged.
+- 5.4: `compare.py` runs every strategy on every map (`--scenario all`), with the ambulance metric averaged over
+  5 dispatches. Results are in `results/compare_<map>.md`.
+- 5.6: the frontend is a multi-view dashboard (Impact, Policy, Events and Inspect tabs, pop-outs via `?view=`).
+  Chart.js is vendored.
+- Cut: `web/mock_frames.json`, the report card, OSM Amherst, and Plan B.
 
 ## 7. Status
 
-- Done: scenario, runner, controller and tests, compare.py, server, dashboard, replay mode (`?replay=…&t=…&autoplay`),
-  backup recording, `results/compare.md` (3 seeds), README, and `pitch/script.md`. `git tag demo-v1` marks the
-  first working end-to-end demo.
-- Keep a feature freeze 1 hour before submission. Never cut the backup recording.
+- Done: Midtown and grid maps; four strategies; events; inspector; follow-a-driver; heatmap; copilot (needs a key
+  in `.env`); replays; 3-seed benchmark (Midtown: CivicSignal best on 8 of 11 metrics); README; `pitch/script.md`
+  (video shot list).
+- Large Midtown recordings (about 45 KB per frame) are gitignored. The committed `recordings/demo.jsonl` is the grid.
+- Keep a feature freeze 1 hour before submission. Re-run `compare.py` after any controller or scenario change.
 
 ## 8. Pitch (2 minutes) and judge Q&A
 
