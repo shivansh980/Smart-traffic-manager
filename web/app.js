@@ -934,6 +934,11 @@ function boot() {
   if (VIEW) { document.body.classList.add('solo'); showTab(VIEW); }
   else if (params.get('tab')) showTab(params.get('tab'));
   if (params.has('heat')) { S.heat = true; syncControls(); }
+  if (params.get('ask')) {   // ?ask=... types a copilot prompt and submits it (clean takes for recordings)
+    showTab('policy');
+    $('copilot-text').value = params.get('ask');
+    setTimeout(askCopilot, 1500);
+  }
   if (params.get('follow')) { S.follow = params.get('follow'); setTimeout(() => send({ type: 'follow', vid: S.follow }), 800); }
   requestAnimationFrame(render);
   if (REPLAY) replay.load(REPLAY); else connect();

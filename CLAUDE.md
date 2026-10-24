@@ -329,7 +329,9 @@ slides, presenting while the builder drives the demo). Nothing on the build path
   `heat` ({edge: CO₂ g/s per 100 m}). `sims` is keyed by strategy (`fixed|actuated|greenwave|adaptive`), with 2 or 4 panes.
 - Server → browser: `state` (weights, panes, scenarios, copilot availability, inspected light), `history` (chart
   backfill), and `frame.inspect`. Browser → server: `event` {ambulance|surge|crash}, `inspect` {tls}, and `config`
-  {scenario, panes}. `POST /api/copilot` turns plain English into weights via Gemini (key read from `.env`).
+  {scenario, panes}, `follow` {vid}. `POST /api/copilot` turns plain English into weights via Gemini (key read from
+  `.env`, spaces allowed). Models are tried in order (`MODELS` in server.py, gemini-2.5-flash first: about 4 s);
+  400/404/429/5xx fall through to the next, because free-tier keys have zero quota on some models.
 - One sim loop broadcasts to every connected window. Windows share the sim, so a test driver must use its own
   port (`python server.py --port 8010`).
 

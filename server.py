@@ -183,12 +183,16 @@ def gemini_key() -> str | None:
     env = ROOT / ".env"
     if not key and env.exists():
         for line in env.read_text().splitlines():
-            if line.strip().startswith("GEMINI_API_KEY="):
-                key = line.split("=", 1)[1].strip().strip('"').strip("'")
+            name, sep, value = line.strip().removeprefix("export ").partition("=")
+            if sep and name.strip() == "GEMINI_API_KEY":   # tolerate spaces and quotes around the value
+                key = value.strip().strip('"').strip("'")
     return key or None
 
 
-_model: str | None = os.environ.get("GEMINI_MODEL")
+# Tried in order; the first that answers is kept. Free-tier keys have no quota on some models (HTTP 429).
+MODELS = [m for m in [os.environ.get("GEMINI_MODEL"), "gemini-2.5-flash", "gemini-2.5-flash-lite",
+                      "gemini-flash-lite-latest", "gemini-flash-latest"] if m]   # measured: 2.5-flash ~4 s
+_model: str | None = None
 
 
 def _gemini(path: str, body: dict | None = None) -> dict:
@@ -199,17 +203,19 @@ def _gemini(path: str, body: dict | None = None) -> dict:
         return json.loads(resp.read())
 
 
-def gemini_model() -> str:
-    """Pick the newest Flash model this key can call, once."""
+def _generate(body: dict) -> tuple[dict, str]:
     global _model
-    if _model:
-        return _model
-    models = _gemini("models?pageSize=200").get("models", [])
-    flash = [m["name"] for m in models if "generateContent" in m.get("supportedGenerationMethods", [])
-             and "flash" in m["name"] and "lite" not in m["name"] and "preview" not in m["name"]
-             and "exp" not in m["name"] and "image" not in m["name"] and "tts" not in m["name"]]
-    _model = sorted(flash)[-1].removeprefix("models/") if flash else "gemini-2.5-flash"
-    return _model
+    last = None
+    for m in ([_model] if _model else []) + [x for x in MODELS if x != _model]:
+        try:
+            out = _gemini(f"models/{m}:generateContent", body)
+            _model = m
+            return out, m
+        except urllib.error.HTTPError as e:
+            if e.code not in (400, 404, 429, 500, 503):   # bad model, no quota, or overloaded: try the next
+                raise
+            last = e
+    raise last
 
 
 COPILOT_PROMPT = """You are the policy copilot for CivicSignal, an adaptive traffic-signal system a city can steer.
@@ -249,11 +255,11 @@ def copilot(text: str, scenario: str, weights: dict) -> dict:
         "generationConfig": {"responseMimeType": "application/json", "responseSchema": COPILOT_SCHEMA,
                              "temperature": 0.2},
     }
-    out = _gemini(f"models/{gemini_model()}:generateContent", body)
+    out, model = _generate(body)
     plan = json.loads(out["candidates"][0]["content"]["parts"][0]["text"])
     for k in ("flow", "climate", "transit", "fairness"):
         plan[k] = round(max(0.0, min(3.0, float(plan[k]))) * 4) / 4
-    plan["model"] = gemini_model()
+    plan["model"] = model
     return plan
 
 
