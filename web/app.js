@@ -528,32 +528,33 @@ function fireEvent(name) {
 }
 
 function addLog(html) {
-  const t = S.frame ? mmss(S.frame.t) : '0:00';
+  const t = S.frame ? mmss(S.frame.t) : '0:00';   // onFrame sets S.frame before events are handled
   S.log.unshift(`<li><time>${t}</time>${html}</li>`);
   S.log = S.log.slice(0, 30);
   $('log').innerHTML = S.log.join('');
 }
 
-function handleEvents(frame) {
+function handleEvents(frame, quiet = false) {
+  const say = quiet ? () => {} : toast;
   for (const ev of frame.events || []) {
     if (ev === 'ambulance_spawned') {
       S.race = { t0: frame.t, done: {} };
-      toast(`🚑 <b>Ambulance dispatched</b> in every city, same route: ${escapeHtml(S.net.meta.ambulance.label)}`, 'amb');
+      say(`🚑 <b>Ambulance dispatched</b> in every city, same route: ${escapeHtml(S.net.meta.ambulance.label)}`, 'amb');
       addLog('🚑 Ambulance dispatched');
     } else if (ev.startsWith('ambulance_arrived_')) {
       const sid = ev.replace('ambulance_arrived_', '');
       const trip = frame.sims[sid].m.amb_last_trip_s;
       if (S.race) S.race.done[sid] = trip;
-      toast(`<b style="color:${STRAT[sid].color}">${STRAT[sid].label}</b> ambulance arrived in <b>${mmss(trip)}</b>`, sid === 'adaptive' ? '' : 'warn');
+      say(`<b style="color:${STRAT[sid].color}">${STRAT[sid].label}</b> ambulance arrived in <b>${mmss(trip)}</b>`, sid === 'adaptive' ? '' : 'warn');
       addLog(`🏥 <b style="color:${STRAT[sid].color}">${STRAT[sid].label}</b> ambulance arrived: ${mmss(trip)}`);
     } else if (ev === 'surge_started') {
-      toast(`🎭 <b>${escapeHtml(S.net.meta.surge.label)}</b>: ${S.net.meta.surge.n} cars pour out`, 'warn');
+      say(`🎭 <b>${escapeHtml(S.net.meta.surge.label)}</b>: ${S.net.meta.surge.n} cars pour out`, 'warn');
       addLog(`🎭 ${escapeHtml(S.net.meta.surge.label)}`);
     } else if (ev === 'crash_started') {
-      toast(`💥 <b>${escapeHtml(S.net.meta.crash.label)}</b>: lanes blocked for ${Math.round(S.net.meta.crash.duration / 60)} min`, 'warn');
+      say(`💥 <b>${escapeHtml(S.net.meta.crash.label)}</b>: lanes blocked for ${Math.round(S.net.meta.crash.duration / 60)} min`, 'warn');
       addLog(`💥 ${escapeHtml(S.net.meta.crash.label)}`);
     } else if (ev === 'sim_end') {
-      toast('Simulation finished. Press ↺ to run again.');
+      say('Simulation finished. Press ↺ to run again.');
     }
   }
 }
@@ -749,7 +750,7 @@ function onFrame(frame, quiet = false) {
     if (h) { S.heatData[sid] = h; for (const k in h) mx = Math.max(mx, h[k]); }
   }
   if (mx) S.heatMax = 0.9 * S.heatMax + 0.1 * Math.max(4, mx);
-  if (!quiet) handleEvents(frame);
+  handleEvents(frame, quiet);   // a replay seek still fills the race and log, just without toasts
   if (frame.inspect) S.pendingInspect = frame.inspect;
 }
 
