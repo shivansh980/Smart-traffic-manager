@@ -430,6 +430,12 @@ function onFrame(frame, quiet = false) {
   if (!quiet) handleEvents(frame);
 }
 
+function onHistory(points) {
+  resetChart();
+  for (const [t, fi, ai, fq, aq] of points) pushChart(t, { idle_co2_kg: fi, queue: fq }, { idle_co2_kg: ai, queue: aq });
+  app.lastT = points.length ? points[points.length - 1][0] : -1;
+}
+
 function onState(st) {
   Object.assign(app.weights, st.weights);
   app.playing = st.playing;
@@ -477,6 +483,7 @@ function connect() {
     const msg = JSON.parse(e.data);
     if (msg.type === 'frame') onFrame(msg);
     else if (msg.type === 'state') onState(msg);
+    else if (msg.type === 'history') onHistory(msg.points);
   };
   ws.onclose = () => {
     app.connected = false;

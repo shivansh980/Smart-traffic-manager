@@ -16,6 +16,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
+from starlette.websockets import WebSocketDisconnected
 
 from core.controller import WeightedMaxPressure
 from core.sumo_runner import SumoRunner
@@ -53,6 +54,7 @@ class Sim:
         self.pending_amb = False
         self.done = False
         self.seen_trips = {"fixed": 0, "adaptive": 0}
+        self.history: list[list[float]] = []   # [t, fixed idle CO2, adaptive idle CO2, fixed queue, adaptive queue]
         if self.record:
             RECORDINGS.mkdir(exist_ok=True)
             self.rec = open(RECORDINGS / f"{time.strftime('%Y%m%d-%H%M%S')}.jsonl", "w")
@@ -82,6 +84,8 @@ class Sim:
                 self.seen_trips[name] = len(runner.amb_trips)
                 events.append(f"ambulance_arrived_{name}")
         t = sims["fixed"]["m"]["t"]
+        fm, am = sims["fixed"]["m"], sims["adaptive"]["m"]
+        self.history.append([t, fm["idle_co2_kg"], am["idle_co2_kg"], fm["queue"], am["queue"]])
         if t >= END:
             self.done, self.playing = True, False
             events.append("sim_end")
@@ -152,6 +156,7 @@ async def ws_endpoint(ws: WebSocket):
 
     async def writer():
         await ws.send_text(dumps(sim.state()))
+        await ws.send_text(dumps({"type": "history", "points": sim.history}))   # a reloaded page keeps its chart
         await ws.send_text(dumps(sim.step()))           # first frame so the UI has something to draw
         while True:
             if sim.playing and not sim.done:
@@ -168,7 +173,7 @@ async def ws_endpoint(ws: WebSocket):
     try:
         done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
         for t in done:
-            if t.exception() and not isinstance(t.exception(), WebSocketDisconnect):
+            if t.exception() and not isinstance(t.exception(), (WebSocketDisconnect, WebSocketDisconnected)):
                 raise t.exception()
     except asyncio.CancelledError:
         pass
