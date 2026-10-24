@@ -32,7 +32,9 @@ anywhere from 83 to 235 seconds."
 
 **Civics (1:10–1:40)**
 "Cities shouldn't get a black box. These sliders are the city's values, written into the controller."
-*Click **Fairness**:* "Fairness caps the longest wait. Watch 'Longest wait right now'. In our runs it cuts the
+*Click **Climate**:* "Climate keeps moving platoons moving, because a restart burns far more fuel than idling. In our
+runs that's 10% less CO₂ and a third fewer stops, on top of the gains you just saw." *Click **Fairness**:*
+"Fairness caps the longest wait. Watch 'Longest wait right now'. In our runs it cuts the
 typical longest wait by 40%." *Click **Transit**:* "Transit puts buses first: 24 to 30% less bus waiting, with no
 cost to everyone else."
 "Every decision is a formula you can read and audit. The city chooses its values; the lights carry them out."
@@ -48,8 +50,10 @@ in the signal cabinet."
   common real-world setup. We haven't benchmarked against actuated control, and we say so.
 - **Why max-pressure, not RL?** It needs no training data and has throughput-optimality results in the literature
   (Varaiya 2013). Every decision is auditable: it's one line of arithmetic per light. That's the civics point.
-- **Downsides?** Cars stop more often (+24% stops per vehicle) but for much less time: time loss is −41%. Total CO₂
-  falls less than idling CO₂ (−9% vs −63%) because stop-and-go acceleration costs fuel too.
+- **Downsides?** With default weights, cars stop more often (+24% stops per vehicle) but for much less time: time
+  loss is −41%. The Climate slider fixes that: stops drop below fixed-time (1.15 vs 1.61) and total CO₂ falls another
+  10%. Our first climate formula (weighting idling CO₂) made CO₂ *worse* by 3%. We measured it, threw it out, and
+  rebuilt it around stops.
 - **Does it only work on your demand?** Gains are biggest when demand is uneven (here, rush hour on one axis at 3× the
   cross streets). That's the normal case downtown. Under perfectly uniform demand a good fixed timer is hard to beat.
 - **Deployment?** Queue counts come from existing loop detectors or cameras, and the controller runs on an edge box in

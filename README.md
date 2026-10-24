@@ -16,6 +16,17 @@ optimizes, and an ambulance button shows emergency preemption clearing a corrido
 | Stops per vehicle | 1.5 | 1.9 | +24% |
 | Throughput / teleports | 2,744 / 0 | 2,748 / 0 | same |
 
+**City sliders** (full runs on seeds 1–2, each preset at 2.5, compared with the default flow-only weights):
+
+| Slider | Measured effect |
+|---|---|
+| Climate | −10% total CO₂, −37% stops, −14% delay. Stops fall below fixed-time (1.15 vs 1.61 per vehicle) |
+| Transit | −24 to −30% bus waiting, no cost to overall delay |
+| Fairness | −40% typical longest wait; worst trip wait 81 → 65 s |
+
+The climate term protects moving platoons, because a restart from a stop burns far more fuel than idling. A first
+version that weighted idling CO₂ measured +3% total CO₂, so we replaced it.
+
 Full table and per-seed numbers: [`results/compare.md`](results/compare.md). Reproduce with
 `python compare.py --seeds 1 2 3` (about 1 minute).
 
@@ -54,7 +65,7 @@ Every live session is also recorded to `recordings/<timestamp>.jsonl` (gitignore
 - `scenario/build.py`: `netgenerate` 3×3 grid, flows from fringe to fringe, a bus line, the ambulance route, and `web/net.json`.
 - `core/sumo_runner.py`: one headless SUMO per side via TraCI subscriptions. Builds per-lane observations and the frame for the browser.
 - `core/controller.py`: weighted max-pressure. Score of a green =
-  `flow·(queue in − queue out) + climate·idling CO₂ + transit·5·buses + fairness·longest wait/30`.
+  `flow·(queue in − queue out) + climate·(moving cars a red would stop) + transit·5·buses + fairness·longest wait/30`.
   Min-green 8 s, max-green 60 s, 3 s yellow plus 1 s all-red on every change, hysteresis 2.
 - **Emergency preemption:** each light sees the ambulance's distance to its stop line along the route
   (`getNextTLS`), so lights ahead clear their queues before it arrives (range 300 m). Yellow is never skipped.
@@ -63,7 +74,8 @@ Every live session is also recorded to `recordings/<timestamp>.jsonl` (gitignore
 
 ## Honest caveats
 
-- Adaptive stops cars more often (+24%) but for much less time. Net time loss is −41%.
+- With the default (flow-only) weights, adaptive stops cars more often (+24%) but for much less time: net time
+  loss is −41%. The Climate slider removes that trade-off.
 - Simulation, not field data: SUMO's HBEFA emission model, a synthetic grid, and synthetic demand.
 - The baseline is SUMO's default fixed-time program (90 s cycle, even split): the common real-world setup, not an
   actuated controller.

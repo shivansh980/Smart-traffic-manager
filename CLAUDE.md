@@ -1,8 +1,8 @@
 # CivicSignal — adaptive traffic lights the city can steer
 
-> Hackachusetts 2026 · team of 3 · ~6 hours · themes: traffic flow + climate + civics
-> Working name; rename freely. This file is the shared spec for all three Claude Code sessions.
-> **Contracts (section 4) are frozen. Change them only if all 3 people agree.**
+> Hackachusetts 2026 · solo build (team of 3 registered) · ~6 hours · themes: traffic flow + climate + civics
+> Working name; rename freely. This file is the spec for Claude Code sessions on this repo.
+> **Contracts (section 4) are frozen: change them only additively, and log changes in section 6.**
 
 ---
 
@@ -310,66 +310,49 @@ Layout (one screen, 1440×900 projector-friendly):
 
 ---
 
-## 6. Team split (3 people) and Claude Code kickoff prompts
+## 6. Working mode (solo) and changes since the freeze
 
-| | Owner | Owns | Needs SUMO? |
-|---|---|---|---|
-| **A** | **You**, the controller and the numbers | `core/types.py`, `core/controller.py`, `compare.py`, `tests/`, `results/` | Only from integration on |
-| **B** | Teammate 2, sim and server | `scenario/`, `core/sumo_runner.py`, `server.py`, `recordings/`, `web/net.json`, `web/mock_frames.json` | Yes, from minute 0 |
-| **C** | Teammate 3, frontend and story | `web/` (except B's two files), `pitch/` | No |
+One person (`serial-optimizer`) builds everything. Teammates use Kiro and are optional helpers (Devpost write-up,
+slides, presenting while the builder drives the demo). Nothing on the build path depends on them.
 
-Each person opens Claude Code at the repo root (this file loads automatically) and pastes their prompt:
+- The A/B/C ownership in 4.1 is historical: any file may be edited.
+- Teammates may still push to the shared repo. Pull and look before writing, don't overwrite or delete their files
+  without asking the user, and pull before every push.
+- After any controller or scenario change: rerun `python -m pytest -q tests`, `python compare.py --seeds 1 2 3`,
+  and `python server.py --record recordings/demo.jsonl`, then commit the refreshed `results/` and recording.
 
-**A:**
-> Read CLAUDE.md. I'm person A. First create core/types.py exactly as in section 4.2 and commit it.
-> Then implement core/controller.py per section 5.3, with pytest tests per 5.3 using fake TLSInfo/LaneObs (no SUMO).
-> When core/sumo_runner.py exists, write compare.py per 5.4 and run `--quick`.
-> Only edit files I own (section 6). Keep it simple; we have 6 hours on an 8 GB laptop.
+**Contract changes since the freeze.** These are additive only, so old callers still work. Keep it that way.
+- `LaneObs.approaching: int = 0`: the count of moving vehicles on the lane. It feeds the climate term.
+- Server → browser also sends `{"type":"state",...}` (weights, playing, sps) and `{"type":"history","points":[...]}`
+  (chart backfill for a reloaded page). Unknown types are ignored.
 
-**B:**
-> Read CLAUDE.md. I'm person B. Step 1: verify the SUMO install per section 3 and tell me exactly what fails, if anything.
-> Step 2: scenario/build.py per 5.1, then run it and confirm 9 controllable lights.
-> Step 3: core/sumo_runner.py per 5.2, using a stub controller that returns `info.initial_state` until core/controller.py lands.
-> Step 4: export web/net.json and record 120 steps of frames to web/mock_frames.json for person C.
-> Step 5: server.py per 5.5. Only edit files I own.
+**Deliberate deviations from section 5. Don't "fix" these back.**
+- 5.2: use `trafficlight.getAllProgramLogics`. In traci 1.28 `getCompleteRedYellowGreenDefinition` is the deprecated
+  alias, despite what its warning text says.
+- 5.3 preemption: the range is 300 m, and the runner gives every light ahead on the ambulance's route its distance
+  along the route (`vehicle.getNextTLS`). At 150 m, with only the current lane checked, the ambulance got stuck
+  behind queues that had stopped at the red.
+- 5.3 climate term: `climate · (moving vehicles on the in-lane)` instead of idle CO₂. The spec's version measured
+  +3% total CO₂. This one measured −10% total CO₂, −37% stops, and −14% delay (seeds 1–2, climate 2.5).
+  The constants are `CLIMATE_IDLE_K` and `CLIMATE_STOP_K` in `core/controller.py`.
+- 5.4: the ambulance metric is the mean of 5 rush-hour dispatches (700…1500 s). A single dispatch is a coin flip
+  on the fixed-time phase.
+- 5.6: Chart.js is vendored in `web/vendor/` so the demo works offline. The layout puts the cards beside the maps.
+- Cut: `web/mock_frames.json`, the city report card, the actuated baseline, OSM/Amherst, and Plan B.
 
-**C:**
-> Read CLAUDE.md. I'm person C. Build web/ per section 5.6: plain HTML/CSS/JS plus Chart.js from cdnjs, no npm.
-> Start with a hand-made mock in the 4.4/4.6 schema, then switch to web/mock_frames.json and web/net.json when they appear,
-> then connect to ws://localhost:8000/ws. Make it look polished on a projector. Then draft pitch/script.md per section 8.
-> Only edit files I own.
+## 7. Status
 
----
-
-## 7. Timeline (T+0 = start; ~6 h)
-
-| When | A (you) | B | C | Gate |
-|---|---|---|---|---|
-| **0:00–0:25** | venv, paste types.py, commit | **SUMO install + smoke test** | serve web/ with `python3 -m http.server 8001` (file:// blocks fetch); mock data + layout skeleton | **T+0:25: SUMO works somewhere? No → Plan B** |
-| **0:25–2:00** | controller + tests | scenario, SumoRunner, net.json, mock_frames.json (target T+1:15) | canvas rendering, cards, chart, controls (log messages) | — |
-| **2:00** | A+B pair: `compare.py --quick` prints fixed vs adaptive | ← | UI renders real mock frames | **Checkpoint 1: adaptive beats fixed in the terminal** |
-| **2:00–3:15** | tune constants and weights terms | server.py, live websocket | wire live websocket, sliders → weights | — |
-| **3:15** | | | | **Checkpoint 2: end-to-end live demo. `git tag demo-v1`. B records a replay NOW.** |
-| **3:15–4:30** | preemption + transit + fairness terms verified; actuated baseline if time | ambulance spawn/tracking, report-card metric, fixes | ambulance UX, report card, polish | — |
-| **4:30** | | | | **FEATURE FREEZE** |
-| **4:30–5:30** | `compare.py --seeds 1 2 3` → results table for slides | final recordings, replay mode works offline | slides, 2-min script, screen-record the demo | — |
-| **5:30–6:00** | rehearse twice | submit | buffer | **Submit with 15+ min to spare** |
-
-**Priorities.** Must: side-by-side fixed vs adaptive, live delay and CO₂, compare.py numbers.
-Should: ambulance, sliders, backup recording.
-Could: buses, fairness, report card, actuated baseline, a real Amherst intersection from OSM (`$SUMO_HOME/tools/osmWebWizard.py`, keep the area tiny).
-
-**Unstuck rules:** timebox any blocker to 20 minutes, then take the fallback or cut the feature. Commit small and often.
-If you're behind at a checkpoint, cut from the Could list first, then Should. Never cut the backup recording.
-
----
+- Done: scenario, runner, controller and tests, compare.py, server, dashboard, replay mode (`?replay=…&t=…&autoplay`),
+  backup recording, `results/compare.md` (3 seeds), README, and `pitch/script.md`. `git tag demo-v1` marks the
+  first working end-to-end demo.
+- Keep a feature freeze 1 hour before submission. Never cut the backup recording.
 
 ## 8. Pitch (2 minutes) and judge Q&A
 
 1. **Hook (15 s):** Every red light over an empty intersection costs time and burns fuel idling.
 2. **Side by side (30 s):** Rush hour hits. The fixed-time queues grow while the adaptive side drains. Point at the delay and idle-CO₂ cards.
 3. **Ambulance (25 s):** Dispatch. Left: stuck. Right: a green corridor. Show both trip times.
-4. **Civics (30 s):** "Cities shouldn't get a black box." Move Climate up, and idle CO₂ drops. Move Fairness up, and max wait drops.
+4. **Civics (30 s):** "Cities shouldn't get a black box." Move Climate up, and stops and total CO₂ drop. Move Fairness up, and max wait drops (numbers: `pitch/script.md`).
    "The city chooses its values; the lights carry them out."
 5. **Results (20 s):** the compare.py table (3 seeds, mean ± std), plus a line on how it would deploy.
 

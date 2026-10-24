@@ -109,3 +109,11 @@ def test_out_lane_backpressure():
     c = make()
     lanes = lambda t: {"n_in": LaneObs(halting=5), "e_in": LaneObs(halting=5), "w_out": LaneObs(halting=10)}
     assert c.score("X", NS, lanes(0)) > c.score("X", EW, lanes(0))
+
+
+def test_climate_protects_moving_platoon():
+    # NS has a platoon rolling toward the stop line; EW has a small queue. Flow alone would switch,
+    # the climate weight keeps the platoon moving.
+    lanes = lambda t: {"n_in": LaneObs(approaching=6), "e_in": LaneObs(halting=4)}
+    assert run(make(Weights(climate=0)), lanes, 0, 20)[MIN_GREEN] == "yyrr"
+    assert all(s == NS for s in run(make(Weights(climate=2.5)), lanes, 0, 20))

@@ -20,7 +20,7 @@ const PRESETS = {
 };
 const SLIDERS = [
   { key: 'flow', label: 'Flow', sub: 'move the most cars' },
-  { key: 'climate', label: 'Climate', sub: 'cut idling CO₂' },
+  { key: 'climate', label: 'Climate', sub: 'fewer stops, less CO₂' },
   { key: 'transit', label: 'Transit', sub: 'buses go first' },
   { key: 'fairness', label: 'Fairness', sub: 'cap the longest wait' },
 ];

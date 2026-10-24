@@ -24,6 +24,7 @@ class LaneObs:                       # dynamic, built every step for each lane t
     buses: int = 0                   # halted buses
     max_wait_s: float = 0.0          # longest consecutive wait of any vehicle on lane
     emergency_dist_m: Optional[float] = None   # nearest emergency vehicle's distance to stop line
+    approaching: int = 0             # moving vehicles (speed >= 0.1 m/s) on lane; added after the freeze, defaulted
 
 class Controller(Protocol):
     weights: Weights

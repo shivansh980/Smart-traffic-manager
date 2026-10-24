@@ -134,6 +134,8 @@ class SumoRunner:
                 o.co2_mg_s += rate
                 if vtype == "bus":
                     o.buses += 1
+            else:
+                o.approaching += 1
             o.max_wait_s = max(o.max_wait_s, wait)
             if vtype == "ambulance":
                 d = self.lane_len[lane] - v[tc.VAR_LANEPOSITION]
