@@ -1,22 +1,29 @@
 'use strict';
 
-// ---------------------------------------------------------------- config
+// ================================================================ config
+const STRAT = {
+  fixed: { color: '#f5a524', label: 'Fixed-time', tag: 'Fixed', sub: "today's timers",
+           how: 'Runs a fixed 90 s cycle with an even split. It never looks at the cars.' },
+  actuated: { color: '#c084fc', label: 'Actuated', tag: 'Actuated', sub: 'detectors extend green',
+              how: 'Same phases, but each green stretches (6–55 s) while its detectors keep seeing cars.' },
+  greenwave: { color: '#60a5fa', label: 'Green wave', tag: 'Wave', sub: 'timed progression',
+               how: 'Fixed timing favouring the avenues, offset light to light so platoons hit consecutive greens.' },
+  adaptive: { color: '#2dd4bf', label: 'CivicSignal', tag: 'Civic', sub: 'adaptive, city-steered', how: '' },
+};
 const COLOR = {
-  fixed: '#f5a524', adaptive: '#2dd4bf',
-  bg: '#0c121b', road: '#273041', junction: '#2c3648', seam: '#0c121b',
-  car: '#c7d2e3', carHalted: '#f87171', bus: '#60a5fa', busHalted: '#f472b6', amb: '#ef4444',
+  bg: '#0b1018', building: '#121a26', buildingEdge: '#1a2434', road: '#263043', junction: '#2a3446',
+  label: '#66758f', landmark: '#a3b3cc',
+  car: '#c7d2e3', carHalted: '#f87171', bus: '#60a5fa', busHalted: '#f472b6', amb: '#ef4444', crash: '#fb923c',
   G: '#22c55e', y: '#facc15', r: '#ef4444',
 };
-const RUSH = [600, 1800];
-const VIEW_INSET = 70;            // metres trimmed off each side: the outer arm ends are empty road
-const VEH = { c: [5, 1.9], b: [12, 2.6], e: [6.5, 2.3] };   // length, width in metres
-const CHART_EVERY = 5;            // sim seconds between chart points
-const QUEUE_SMOOTH = 90;          // rolling mean (s) over one 90 s signal cycle; raw queues swing with it
+const VEH = { c: [5, 1.9], b: [12, 2.6], e: [6.5, 2.3], x: [5, 2.0] };
+const TERM_COLORS = { flow: '#2dd4bf', climate: '#34d399', transit: '#60a5fa', fairness: '#f5a524' };
 const PRESETS = {
-  commute: { flow: 1, climate: 0, transit: 0, fairness: 0 },
-  climate: { flow: 1, climate: 2.5, transit: 0, fairness: 0 },
-  transit: { flow: 1, climate: 0, transit: 2.5, fairness: 0 },
-  fair:    { flow: 1, climate: 0, transit: 0, fairness: 2.5 },
+  Balanced: { flow: 1, climate: 1, transit: 0.5, fairness: 0 },
+  Commute: { flow: 1, climate: 0, transit: 0, fairness: 0 },
+  Climate: { flow: 1, climate: 2.5, transit: 0, fairness: 0 },
+  Transit: { flow: 1, climate: 1, transit: 2.5, fairness: 0 },
+  Fairness: { flow: 1, climate: 1, transit: 0, fairness: 2.5 },
 };
 const SLIDERS = [
   { key: 'flow', label: 'Flow', sub: 'move the most cars' },
@@ -24,94 +31,151 @@ const SLIDERS = [
   { key: 'transit', label: 'Transit', sub: 'buses go first' },
   { key: 'fairness', label: 'Fairness', sub: 'cap the longest wait' },
 ];
-const CARDS = [
-  { key: 'avg_delay_s', label: 'Avg delay per vehicle', unit: 's', dec: 1, lower: true },
-  { key: 'idle_co2_kg', label: 'Idling CO₂ (wasted)', unit: 'kg', dec: 1, lower: true, hero: true },
-  { key: 'co2_kg', label: 'Total CO₂', unit: 'kg', dec: 0, lower: true },
-  { key: 'arrived', label: 'Trips completed', unit: '', dec: 0, lower: false },
-  { key: 'max_wait_s', label: 'Longest wait right now', unit: 's', dec: 0, lower: true },
-  { key: 'amb', label: 'Ambulance trip', unit: 's', dec: 0, lower: true },
-];
+const USD_PER_GAL = 3.5, L_PER_GAL = 3.785, RUSH_HOURS_PER_YEAR = 2 * 250;
+const CHART_EVERY = 5, QUEUE_SMOOTH = 90, WINDOW_KEEP = 130;
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const REPLAY = params.get('replay');
+const VIEW = params.get('view');
+const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const short = (n) => (n || '').replace('Avenue', 'Ave').replace('Street', 'St').replace('West ', 'W ').replace('East ', 'E ');
 
-const app = {
-  net: null, frame: null, dirty: false,
-  playing: false, sps: 10, ws: null, connected: false,
-  weights: { flow: 1, climate: 0, transit: 0, fairness: 0, preempt: true },
-  lastT: -1, lastChartT: -Infinity,
+const S = {
+  state: null, scenario: null, panes: [], net: null, nets: {}, views: {},
+  frame: null, dirty: false, playing: false, sps: 10,
+  weights: { flow: 1, climate: 1, transit: 0.5, fairness: 0, preempt: true },
+  heat: false, heatMax: 10, heatData: {}, win: 'all', snaps: [],
+  follow: null, seen: {}, last: {}, inspect: null, race: null, log: [],
+  ws: null, lastT: -1,
 };
 
-// ---------------------------------------------------------------- map view
+// ================================================================ map view
 class MapView {
-  constructor(canvas) {
-    this.canvas = canvas;
-    this.ctx = canvas.getContext('2d');
+  constructor(sid, wrap) {
+    this.sid = sid;
+    this.wrap = wrap;
+    this.canvas = document.createElement('canvas');
+    wrap.appendChild(this.canvas);
+    this.ctx = this.canvas.getContext('2d');
     this.bg = document.createElement('canvas');
-    new ResizeObserver(() => this.resize()).observe(canvas.parentElement);
+    this.canvas.addEventListener('click', (e) => this.click(e));
+    new ResizeObserver(() => this.resize()).observe(wrap);
   }
 
   setNet(net) {
     this.net = net;
-    const [x0, y0, x1, y1] = net.bounds;
-    this.view = [x0 + VIEW_INSET, y0 + VIEW_INSET, x1 - VIEW_INSET, y1 - VIEW_INSET];
-    // signal bar geometry: lane end point + perpendicular, precomputed once
-    this.stops = {};
-    for (const lane of net.lanes) {
-      const s = lane.shape, [ax, ay] = s[s.length - 2], [bx, by] = s[s.length - 1];
-      const len = Math.hypot(bx - ax, by - ay) || 1;
-      this.stops[lane.id] = { x: bx, y: by, nx: -(by - ay) / len, ny: (bx - ax) / len, w: lane.w };
-    }
-    // junction squares: half-size = nearest lane end to the node (Chebyshev distance)
-    this.junctions = net.tls.map((t) => {
-      let h = Infinity;
-      for (const lane of net.lanes) {
-        const [ex, ey] = lane.shape[lane.shape.length - 1];
-        const d = Math.max(Math.abs(ex - t.x), Math.abs(ey - t.y));
-        if (d > 1 && d < h) h = d;
-      }
-      return { ...t, h: Math.min(h, 25) };
-    });
+    this.orientation = null;
     this.resize();
+  }
+
+  // Frame the signalized area (plus a block of approach), turned so it fills the pane best:
+  // avenues vertical (the usual Manhattan view) or horizontal, whichever gives the larger scale.
+  viewFor(rotDeg) {
+    const rd = (rotDeg * Math.PI) / 180, c = Math.cos(rd), s = Math.sin(rd);
+    const [x0, y0, x1, y1] = this.net.bounds, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    const pts = this.net.tls.length >= 4 ? this.net.tls.map((t) => [t.x, t.y]) : this.net.lanes.flatMap((l) => l.shape);
+    let mnx = Infinity, mny = Infinity, mxx = -Infinity, mxy = -Infinity;
+    for (const [x, y] of pts) {
+      const dx = x - cx, dy = y - cy, rx = dx * c - dy * s, ry = dx * s + dy * c;
+      mnx = Math.min(mnx, rx); mny = Math.min(mny, ry); mxx = Math.max(mxx, rx); mxy = Math.max(mxy, ry);
+    }
+    const pad = this.net.tls.length >= 4 ? 95 : 14;
+    return [mnx - pad, mny - pad, mxx + pad, mxy + pad];
+  }
+
+  orient(rotDeg) {
+    const net = this.net;
+    this.rotDeg = rotDeg;
+    const rd = (this.rotDeg * Math.PI) / 180;
+    this.cos = Math.cos(rd); this.sin = Math.sin(rd);
+    const [x0, y0, x1, y1] = net.bounds;
+    this.cx = (x0 + x1) / 2; this.cy = (y0 + y1) / 2;
+    this.lanes = net.lanes.map((l) => ({ id: l.id, edge: l.id.replace(/_\d+$/, ''), w: l.w, pts: l.shape.map((p) => this.R(p[0], p[1])) }));
+    this.view = this.viewFor(rotDeg);
+    this.stops = {};
+    for (const l of this.lanes) {
+      const n = l.pts.length;
+      const [ax, ay] = l.pts[n - 2], [bx, by] = l.pts[n - 1];
+      const len = Math.hypot(bx - ax, by - ay) || 1;
+      this.stops[l.id] = { x: bx, y: by, nx: -(by - ay) / len, ny: (bx - ax) / len, w: l.w };
+    }
+    this.junctions = (net.junctions || []).map((j) => j.shape.map((p) => this.R(p[0], p[1])));
+    this.buildings = (net.buildings || []).map((b) => b.map((p) => this.R(p[0], p[1])));
+    this.labels = (net.labels || []).map((l) => ({ ...l, p: this.R(l.x, l.y), a: l.angle + this.rotDeg }));
+    this.landmarks = (net.meta.landmarks || []).map((l) => ({ ...l, p: this.R(l.x, l.y) }));
+    this.tls = net.tls.map((t) => ({ id: t.id, p: this.R(t.x, t.y) }));
+  }
+
+  R(x, y) {
+    const dx = x - this.cx, dy = y - this.cy;
+    return [dx * this.cos - dy * this.sin, dx * this.sin + dy * this.cos];
   }
 
   resize() {
     if (!this.net) return;
-    const wrap = this.canvas.parentElement.getBoundingClientRect();
-    const side = Math.max(120, Math.floor(Math.min(wrap.width - 20, wrap.height - 10)));
+    const r = this.wrap.getBoundingClientRect();
+    const w = Math.max(100, Math.floor(r.width)), h = Math.max(100, Math.floor(r.height));
     const dpr = window.devicePixelRatio || 1;
-    this.dpr = dpr;
-    this.side = side;
-    for (const c of [this.canvas, this.bg]) { c.width = side * dpr; c.height = side * dpr; }
-    this.canvas.style.width = this.canvas.style.height = side + 'px';
+    this.w = w; this.h = h; this.dpr = dpr;
+    for (const c of [this.canvas, this.bg]) { c.width = w * dpr; c.height = h * dpr; }
+    const base = this.net.meta.rotate_deg || 0;
+    const fit = (v) => Math.min(w / (v[2] - v[0]), h / (v[3] - v[1]));
+    const want = fit(this.viewFor(base - 90)) > fit(this.viewFor(base)) * 1.08 ? 'h' : 'v';
+    if (want !== this.orientation) { this.orientation = want; this.orient(want === 'h' ? base - 90 : base); }
     const [x0, y0, x1, y1] = this.view;
-    this.s = side / Math.max(x1 - x0, y1 - y0);
+    this.s = Math.min(w / (x1 - x0), h / (y1 - y0));
+    this.ox = (w - (x1 - x0) * this.s) / 2;
+    this.oy = (h - (y1 - y0) * this.s) / 2;
     this.drawBackground();
-    app.dirty = true;
+    S.dirty = true;
   }
 
-  px(x, y) { return [(x - this.view[0]) * this.s, (this.view[3] - y) * this.s]; }
+  px(x, y) { return [this.ox + (x - this.view[0]) * this.s, this.oy + (this.view[3] - y) * this.s]; }
+  world(px, py) { return [this.view[0] + (px - this.ox) / this.s, this.view[3] - (py - this.oy) / this.s]; }
+
+  path(ctx, pts, close) {
+    ctx.beginPath();
+    pts.forEach(([x, y], i) => { const [a, b] = this.px(x, y); i ? ctx.lineTo(a, b) : ctx.moveTo(a, b); });
+    if (close) ctx.closePath();
+  }
 
   drawBackground() {
     const ctx = this.bg.getContext('2d');
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.fillStyle = COLOR.bg;
-    ctx.fillRect(0, 0, this.side, this.side);
-    ctx.lineCap = 'butt';
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = COLOR.road;
-    for (const lane of this.net.lanes) {
-      ctx.lineWidth = Math.max(1.5, lane.w * this.s - 0.6);   // the gap reads as a lane line
-      ctx.beginPath();
-      lane.shape.forEach(([x, y], i) => { const [px, py] = this.px(x, y); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
-      ctx.stroke();
+    ctx.fillRect(0, 0, this.w, this.h);
+    ctx.fillStyle = COLOR.building; ctx.strokeStyle = COLOR.buildingEdge; ctx.lineWidth = 0.6;
+    for (const b of this.buildings) { this.path(ctx, b, true); ctx.fill(); ctx.stroke(); }
+    ctx.lineCap = 'butt'; ctx.lineJoin = 'round'; ctx.strokeStyle = COLOR.road;
+    for (const l of this.lanes) {
+      ctx.lineWidth = Math.max(1.2, l.w * this.s - 0.5);
+      this.path(ctx, l.pts, false); ctx.stroke();
     }
     ctx.fillStyle = COLOR.junction;
-    for (const j of this.junctions) {
-      const [px, py] = this.px(j.x, j.y), h = j.h * this.s;
-      ctx.fillRect(px - h, py - h, 2 * h, 2 * h);
+    for (const j of this.junctions) { this.path(ctx, j, true); ctx.fill(); }
+    // street names: avenues everywhere, cross streets on the west side only (less clutter)
+    ctx.font = `600 ${Math.max(9, Math.min(12, 13 * this.s))}px ui-sans-serif, system-ui, sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const l of this.labels) {
+      if (!l.major && !/^W |^\d/.test(l.text)) continue;
+      const [x, y] = this.px(l.p[0], l.p[1]);
+      let a = ((l.a % 360) + 360) % 360;
+      if (a > 90 && a < 270) a -= 180;
+      ctx.save(); ctx.translate(x, y); ctx.rotate((-a * Math.PI) / 180);
+      ctx.fillStyle = 'rgba(11,16,24,.75)';
+      const tw = ctx.measureText(l.text).width;
+      ctx.fillRect(-tw / 2 - 3, -7, tw + 6, 14);
+      ctx.fillStyle = l.major ? '#8c9ab3' : COLOR.label;
+      ctx.fillText(l.text, 0, 0.5);
+      ctx.restore();
+    }
+    ctx.font = '600 11px ui-sans-serif, system-ui, sans-serif'; ctx.textAlign = 'left';
+    for (const m of this.landmarks) {
+      const [x, y] = this.px(m.p[0], m.p[1]);
+      ctx.fillStyle = COLOR.landmark;
+      ctx.beginPath(); ctx.arc(x + 14, y - 14, 2.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillText(m.text, x + 20, y - 14);
     }
   }
 
@@ -119,413 +183,754 @@ class MapView {
     const { ctx, s, dpr } = this;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(this.bg, 0, 0);
-    if (!sim) return;
-
-    // signals: a bar across each lane's stop line
+    if (!sim || !this.net) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.lineWidth = Math.max(3, 2.2 * s);
-    ctx.lineCap = 'butt';
-    for (const [lane, st] of Object.entries(sim.sig)) {
+
+    if (S.heat && S.heatData[this.sid]) {
+      if (!this.heatLayer || now - this.heatAt > 500) this.drawHeat(S.heatData[this.sid]);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(this.heatLayer, 0, 0);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    ctx.lineWidth = Math.max(2.5, 2 * s); ctx.lineCap = 'butt';
+    for (const lane in sim.sig) {
       const p = this.stops[lane];
       if (!p) continue;
-      const [cx, cy] = this.px(p.x, p.y), hw = (p.w / 2) * s + 0.6;
-      ctx.strokeStyle = COLOR[st] || COLOR.r;
-      ctx.beginPath();
-      ctx.moveTo(cx - p.nx * hw, cy + p.ny * hw);
-      ctx.lineTo(cx + p.nx * hw, cy - p.ny * hw);
-      ctx.stroke();
+      const [cx, cy] = this.px(p.x, p.y), hw = (p.w / 2) * s + 0.5;
+      ctx.strokeStyle = COLOR[sim.sig[lane]] || COLOR.r;
+      ctx.beginPath(); ctx.moveTo(cx - p.nx * hw, cy + p.ny * hw); ctx.lineTo(cx + p.nx * hw, cy - p.ny * hw); ctx.stroke();
     }
 
-    // vehicles: rotated rects, front bumper at (x, y), angle clockwise from north
-    const kl = Math.max(0.9, 1.1 * s);                // px per metre along the vehicle
-    const kw = (w) => Math.max(2.6, w * s * 1.6);     // width in px, boosted so it reads on a projector
-    let amb = [];
+    const kl = Math.max(0.9, 1.1 * s), kw = (w) => Math.max(2.4, w * s * 1.6);
+    const special = [];
     for (const v of sim.veh) {
-      const [, x, y, ang, kind, halted] = v;
-      const [px, py] = this.px(x, y);
+      const kind = v[4];
+      const [wx, wy] = this.R(v[1], v[2]);
+      const [px, py] = this.px(wx, wy);
+      if (px < -20 || py < -20 || px > this.w + 20 || py > this.h + 20) continue;
       const [L, W] = VEH[kind] || VEH.c;
-      const a = (ang * Math.PI) / 180, c = Math.cos(a), sn = Math.sin(a);
+      const a = ((v[3] - this.rotDeg) * Math.PI) / 180, c = Math.cos(a), sn = Math.sin(a);
       ctx.setTransform(dpr * c, dpr * sn, -dpr * sn, dpr * c, dpr * px, dpr * py);
-      if (kind === 'e') { amb.push([px, py]); continue; }
-      ctx.fillStyle = kind === 'b' ? (halted ? COLOR.busHalted : COLOR.bus) : (halted ? COLOR.carHalted : COLOR.car);
+      if (kind === 'e' || kind === 'x' || v[0] === S.follow) special.push([v, px, py]);
+      ctx.fillStyle = kind === 'e' ? COLOR.amb : kind === 'x' ? COLOR.crash : kind === 'b'
+        ? (v[5] ? COLOR.busHalted : COLOR.bus) : (v[5] ? COLOR.carHalted : COLOR.car);
       ctx.fillRect(-kw(W) / 2, 0, kw(W), L * kl);
     }
-    // ambulances last, on top, with a pulsing halo and flashing outline
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const flash = Math.floor(now / 250) % 2 === 0;
-    for (const [px, py] of amb) {
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      const r = 9 + 5 * (0.5 + 0.5 * Math.sin(now / 160));
-      ctx.fillStyle = flash ? 'rgba(239,68,68,0.28)' : 'rgba(96,165,250,0.28)';
-      ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.fill();
+    for (const [v, px, py] of special) {
+      if (v[4] === 'e') {
+        const r = 10 + 5 * (0.5 + 0.5 * Math.sin(now / 160));
+        ctx.fillStyle = flash ? 'rgba(239,68,68,.32)' : 'rgba(96,165,250,.32)';
+        ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = flash ? '#fff' : '#60a5fa'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2); ctx.stroke();
+      } else if (v[4] === 'x') {
+        ctx.strokeStyle = `rgba(251,146,60,${0.5 + 0.4 * Math.sin(now / 200)})`; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(px, py, 9, 0, Math.PI * 2); ctx.stroke();
+      }
+      if (v[0] === S.follow) {
+        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(px, py, 11, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = '#fff'; ctx.font = '700 11px ui-sans-serif, system-ui'; ctx.textAlign = 'left';
+        ctx.fillText('you', px + 13, py - 9);
+      }
     }
-    for (const v of sim.veh) {
-      if (v[4] !== 'e') continue;
-      const [px, py] = this.px(v[1], v[2]);
-      const [L, W] = VEH.e, a = (v[3] * Math.PI) / 180, c = Math.cos(a), sn = Math.sin(a);
-      ctx.setTransform(dpr * c, dpr * sn, -dpr * sn, dpr * c, dpr * px, dpr * py);
-      ctx.fillStyle = COLOR.amb;
-      ctx.fillRect(-kw(W) / 2, 0, kw(W), L * kl);
-      ctx.lineWidth = 1.2;
-      ctx.strokeStyle = flash ? '#ffffff' : '#60a5fa';
-      ctx.strokeRect(-kw(W) / 2, 0, kw(W), L * kl);
+    if (S.inspect) {
+      const t = this.tls.find((x) => x.id === S.inspect);
+      if (t) {
+        const [px, py] = this.px(t.p[0], t.p[1]);
+        ctx.setLineDash([4, 3]); ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(px, py, Math.max(14, 16 * s), 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+      }
     }
+  }
+
+  // the emissions glow is expensive to stroke, so it is re-rendered twice a second into its own layer
+  drawHeat(heat) {
+    this.heatAt = performance.now();
+    if (!this.heatLayer) this.heatLayer = document.createElement('canvas');
+    const c = this.heatLayer;
+    if (c.width !== this.canvas.width || c.height !== this.canvas.height) { c.width = this.canvas.width; c.height = this.canvas.height; }
+    const ctx = c.getContext('2d');
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, c.width, c.height);
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.lineCap = 'round';
+    for (const l of this.lanes) {
+      const v = heat[l.edge];
+      if (!v) continue;
+      const f = Math.min(1, v / S.heatMax) ** 1.4;   // one scale shared by every pane
+      if (f < 0.04) continue;
+      ctx.strokeStyle = `rgba(255, ${Math.round(190 - 160 * f)}, ${Math.round(70 - 60 * f)}, ${0.08 + 0.55 * f})`;
+      ctx.lineWidth = Math.max(3, l.w * this.s * (1.2 + 2.2 * f));
+      this.path(ctx, l.pts, false); ctx.stroke();
+    }
+  }
+
+  click(e) {
+    const rect = this.canvas.getBoundingClientRect();
+    const [wx, wy] = this.world(e.clientX - rect.left, e.clientY - rect.top);
+    const sim = S.frame && S.frame.sims[this.sid];
+    let best = null, bd = 9 / Math.min(1, this.s);
+    if (sim) for (const v of sim.veh) {
+      if (v[4] === 'x') continue;
+      const [x, y] = this.R(v[1], v[2]);
+      const d = Math.hypot(x - wx, y - wy);
+      if (d < bd) { bd = d; best = v[0]; }
+    }
+    if (best) { setFollow(best); return; }
+    let tb = null, td = 30;
+    for (const t of this.tls) {
+      const d = Math.hypot(t.p[0] - wx, t.p[1] - wy);
+      if (d < td) { td = d; tb = t.id; }
+    }
+    if (tb) setInspect(tb);
   }
 }
 
-const views = { fixed: new MapView($('cv-fixed')), adaptive: new MapView($('cv-adaptive')) };
-
-// ---------------------------------------------------------------- cards
-function buildCards() {
-  $('cards').innerHTML = CARDS.map((c) => `
-    <div class="card${c.hero ? ' hero' : ''}" id="card-${c.key}">
-      <div class="card-label"><span>${c.label}</span></div>
-      <div class="delta" data-role="delta">—</div>
-      <div class="pair">
-        <div class="f"><span>Fixed</span><b data-role="f">—</b></div>
-        <div class="a"><span>CivicSignal</span><b data-role="a">—</b></div>
-      </div>
-    </div>`).join('');
+// ================================================================ panes
+async function loadNet(id) {
+  if (!S.nets[id]) S.nets[id] = await (await fetch(`scenarios/${id}.json`)).json();
+  return S.nets[id];
 }
 
-const fmt = (v, dec, unit) => (v == null ? '—' : `${Number(v).toFixed(dec)}${unit ? `<small>${unit}</small>` : ''}`);
-const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-
-function ambValue(m) {
-  if (m.amb_active) return { text: `${mmss(m.amb_elapsed_s)}<small class="nowrap"> en route</small>`, val: null };
-  if (m.amb_last_trip_s != null) return { text: fmt(m.amb_last_trip_s, 0, 's'), val: m.amb_last_trip_s };
-  return { text: '—', val: null };
-}
-
-function updateCards(f, a) {
-  for (const c of CARDS) {
-    const el = $(`card-${c.key}`);
-    const d = el.querySelector('[data-role="delta"]');
-    let fv, av, ftext, atext;
-    if (c.key === 'amb') {
-      const fa = ambValue(f), aa = ambValue(a);
-      fv = fa.val; av = aa.val; ftext = fa.text; atext = aa.text;
-    } else {
-      fv = f[c.key]; av = a[c.key]; ftext = fmt(fv, c.dec, c.unit); atext = fmt(av, c.dec, c.unit);
-    }
-    el.querySelector('[data-role="f"]').innerHTML = ftext;
-    el.querySelector('[data-role="a"]').innerHTML = atext;
-
-    d.className = 'delta';
-    if (fv == null || av == null || (c.key !== 'amb' && f.t < 60)) { d.innerHTML = '—'; continue; }
-    if (c.key === 'amb') {
-      const diff = av - fv;
-      d.innerHTML = `${diff > 0 ? '+' : '−'}${Math.abs(diff).toFixed(0)}<small>s</small>`;
-      d.classList.add(diff < 0 ? 'good' : diff > 0 ? 'bad' : 'x');
-      continue;
-    }
-    if (fv === 0) { d.innerHTML = av === 0 ? '0%' : '—'; continue; }
-    let pct = ((av - fv) / Math.abs(fv)) * 100;
-    if (Math.abs(pct) < 0.5) pct = 0;
-    const better = c.lower ? pct < -0.5 : pct > 0.5, worse = c.lower ? pct > 0.5 : pct < -0.5;
-    d.innerHTML = `${pct > 0 ? '+' : pct < 0 ? '−' : ''}${Math.abs(pct).toFixed(0)}%`;
-    if (better) d.classList.add('good'); else if (worse) d.classList.add('bad');
+async function buildPanes(scenario, panes) {
+  S.scenario = scenario; S.panes = panes;
+  S.net = await loadNet(scenario);
+  $('attribution').textContent = S.net.meta.attribution || '';
+  const box = $('panes');
+  box.innerHTML = '';
+  box.classList.toggle('four', panes.length > 2);
+  S.views = {};
+  for (const sid of panes) {
+    const st = STRAT[sid];
+    const el = document.createElement('section');
+    el.className = 'pane';
+    el.style.setProperty('--accent', st.color);
+    el.innerHTML = `<div class="pane-head"><h2><span class="swatch"></span>${st.label} <em>${st.sub}</em></h2>
+      <span class="pane-stat" id="stat-${sid}"></span></div><div class="pane-wrap"></div>`;
+    box.appendChild(el);
+    const v = new MapView(sid, el.querySelector('.pane-wrap'));
+    v.setNet(S.net);
+    S.views[sid] = v;
   }
+  for (const sid of panes) { S.seen[sid] = new Map(); S.last[sid] = null; }
+  S.snaps = []; S.race = null; S.follow = null; S.heatData = {}; $('follow').hidden = true;
+  buildChart();
+  eventLabels();
+  renderInspect(null);
 }
 
-function updateMapStats(name, m) {
-  let s = `queued <b>${m.queue}</b> · moving <b>${Math.max(0, m.running - m.queue)}</b>`;
-  if (m.amb_active) s += ` · <span class="amb">🚑 ${mmss(m.amb_elapsed_s)}</span>`;
-  else if (m.amb_last_trip_s != null) s += ` · 🚑 ${m.amb_last_trip_s.toFixed(0)}s`;
-  $(`stat-${name}`).innerHTML = s;
+// ================================================================ impact panel
+const METRICS = [
+  { group: 'Traffic' },
+  { key: 'delay', label: 'Avg delay / vehicle', unit: 's', wlabel: 'Stopped, s per min driven', lower: true, dec: 1,
+    all: (m) => m.avg_delay_s, win: (a, b) => ((b.halt_vs - a.halt_vs) / Math.max(1, b.veh_s - a.veh_s)) * 60 },
+  { key: 'stops', label: 'Stops / vehicle', unit: '', wlabel: 'Stops per veh-min', lower: true, dec: 2,
+    all: (m) => m.stops / Math.max(1, m.arrived + m.running), win: (a, b) => ((b.stops - a.stops) / Math.max(1, b.veh_s - a.veh_s)) * 60 },
+  { key: 'trips', label: 'Trips completed', unit: '', wlabel: 'Trips per min', lower: false, dec: 0, wdec: 1,
+    all: (m) => m.arrived, win: (a, b, dt) => ((b.arrived - a.arrived) / dt) * 60 },
+  { key: 'wait', label: 'Longest wait now', unit: 's', lower: true, dec: 0, all: (m) => m.max_wait_s, win: (a, b) => b.max_wait_s },
+  { group: 'Climate & health' },
+  { key: 'idle', label: 'Idling CO₂ (wasted)', unit: 'kg', wlabel: 'Idling CO₂, kg/min', lower: true, dec: 1, wdec: 2,
+    all: (m) => m.idle_co2_kg, win: (a, b, dt) => ((b.idle_co2_kg - a.idle_co2_kg) / dt) * 60 },
+  { key: 'co2', label: 'Total CO₂', unit: 'kg', wlabel: 'CO₂, kg/min', lower: true, dec: 0, wdec: 1,
+    all: (m) => m.co2_kg, win: (a, b, dt) => ((b.co2_kg - a.co2_kg) / dt) * 60 },
+  { key: 'fuel', label: 'Fuel burned', unit: '$', pre: true, wlabel: 'Fuel, $/min', lower: true, dec: 0, wdec: 2,
+    all: (m) => (m.fuel_l / L_PER_GAL) * USD_PER_GAL, win: (a, b, dt) => (((b.fuel_l - a.fuel_l) / L_PER_GAL) * USD_PER_GAL / dt) * 60 },
+  { key: 'nox', label: 'NOx (smog, asthma)', unit: 'g', wlabel: 'NOx, g/min', lower: true, dec: 0, wdec: 1,
+    all: (m) => m.nox_g, win: (a, b, dt) => ((b.nox_g - a.nox_g) / dt) * 60 },
+  { key: 'pm', label: 'Particulates (PM)', unit: 'g', wlabel: 'PM, g/min', lower: true, dec: 1, wdec: 2,
+    all: (m) => m.pm_g, win: (a, b, dt) => ((b.pm_g - a.pm_g) / dt) * 60 },
+  { group: 'Civic' },
+  { key: 'bus', label: 'Bus trip (avg)', unit: 's', lower: true, dec: 0, all: (m) => m.bus_avg_trip_s, win: (a, b) => b.bus_avg_trip_s },
+  { key: 'amb', label: 'Ambulance trip', unit: 's', lower: true, dec: 0, all: (m) => m.amb_last_trip_s, win: (a, b) => b.amb_last_trip_s },
+];
+
+function windowPair(sid) {
+  if (!S.snaps.length) return null;
+  const b = S.snaps[S.snaps.length - 1];
+  const target = b.t - Number(S.win);
+  let a = S.snaps[0];
+  for (const s of S.snaps) { if (s.t <= target) a = s; else break; }
+  if (b.t - a.t < 20) return null;
+  return [a.m[sid], b.m[sid], b.t - a.t];
 }
 
-// ---------------------------------------------------------------- chart
-let chart;
-function buildChart() {
-  const rushBand = {
-    id: 'rush',
-    beforeDatasetsDraw(c) {
-      const { ctx, chartArea: a, scales: { x } } = c;
-      const l = x.getPixelForValue(RUSH[0]), r = x.getPixelForValue(RUSH[1]);
-      ctx.save();
-      ctx.fillStyle = 'rgba(245,165,36,0.06)';
-      ctx.fillRect(l, a.top, r - l, a.bottom - a.top);
-      ctx.fillStyle = 'rgba(245,165,36,0.55)';
-      ctx.font = '600 11px system-ui, sans-serif';
-      ctx.fillText('RUSH HOUR', l + 6, a.top + 14);
-      ctx.restore();
-    },
+function metricValue(def, sid) {
+  const m = S.frame.sims[sid].m;
+  if (S.win === 'all') return def.all(m);
+  const p = windowPair(sid);
+  return p ? def.win(p[0], p[1], p[2]) : null;
+}
+
+function fmtVal(def, v) {
+  if (v == null || Number.isNaN(v)) return '—';
+  const dec = S.win !== 'all' && def.wdec != null ? def.wdec : def.dec;
+  const n = Number(v).toLocaleString(undefined, { minimumFractionDigits: dec, maximumFractionDigits: dec });
+  const unit = S.win === 'all' && def.unit && S.panes.length <= 2 ? ` ${def.unit}` : '';
+  return def.pre ? `${def.unit}${n}` : `${n}${unit}`;
+}
+
+function baseline() { return S.panes.find((p) => p !== 'adaptive'); }
+
+function renderImpact() {
+  if (!S.frame) return;
+  const panes = S.panes;
+  const compact = panes.length > 2;
+  $('score').classList.toggle('compact', compact);
+  let html = `<tr><th></th>${panes.map((p) => `<th><span class="dot" style="background:${STRAT[p].color}"></span>${compact ? STRAT[p].tag : STRAT[p].label}</th>`).join('')}</tr>`;
+  for (const def of METRICS) {
+    if (def.group) { html += `<tr class="group"><td colspan="${panes.length + 1}">${def.group}</td></tr>`; continue; }
+    const vals = panes.map((p) => metricValue(def, p));
+    const ok = vals.filter((v) => v != null && !Number.isNaN(v));
+    const best = ok.length > 1 && S.frame.t > 60 ? (def.lower ? Math.min(...ok) : Math.max(...ok)) : null;
+    const label = S.win === 'all' ? def.label : (def.wlabel || def.label);
+    html += `<tr><td>${label}</td>${vals.map((v) => `<td class="${best != null && v === best && new Set(ok).size > 1 ? 'best' : ''}">${fmtVal(def, v)}</td>`).join('')}</tr>`;
+  }
+  $('score').innerHTML = html;
+
+  // hero: CivicSignal vs the other pane
+  const base = baseline();
+  if (!base || !panes.includes('adaptive') || S.frame.t < 60) {
+    $('hero').innerHTML = `<div class="vs">The scoreboard fills in once the simulation is running.</div>`;
+    $('annual').hidden = true;
+    return;
+  }
+  const pct = (key) => {
+    const d = METRICS.find((x) => x.key === key);
+    const b = metricValue(d, base), a = metricValue(d, 'adaptive');
+    if (b == null || a == null || b === 0) return null;
+    return ((a - b) / Math.abs(b)) * 100;
   };
-  const line = (label, color, axis, dashed) => ({
-    label, data: [], borderColor: color, backgroundColor: color, yAxisID: axis,
-    borderWidth: dashed ? 1.5 : 2.6, borderDash: dashed ? [5, 4] : [], pointRadius: 0, tension: 0.25,
-  });
-  Chart.defaults.color = '#8a9ab4';
-  Chart.defaults.font.family = 'ui-sans-serif, system-ui, -apple-system, sans-serif';
-  chart = new Chart($('chart'), {
-    type: 'line',
-    data: {
-      datasets: [
-        line('Idling CO₂ · fixed', COLOR.fixed, 'co2', false),
-        line('Idling CO₂ · CivicSignal', COLOR.adaptive, 'co2', false),
-        line('Queue · fixed', COLOR.fixed + 'aa', 'q', true),
-        line('Queue · CivicSignal', COLOR.adaptive + 'aa', 'q', true),
-      ],
-    },
-    options: {
-      animation: false, parsing: false, normalized: true, maintainAspectRatio: false, spanGaps: true,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { position: 'top', align: 'start', labels: { boxWidth: 14, boxHeight: 3, padding: 12,
-          filter: (item) => item.datasetIndex < 2 } },
-        tooltip: { callbacks: { title: (items) => mmss(items[0].parsed.x) } },
-      },
-      scales: {
-        x: { type: 'linear', min: 0, max: 2400, grid: { color: '#1b2333' },
-             ticks: { stepSize: 300, callback: (v) => `${v / 60} min` } },
-        co2: { position: 'left', beginAtZero: true, grid: { color: '#1b2333' },
-               title: { display: true, text: 'kg CO₂ idling' } },
-        q: { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false },
-             title: { display: true, text: 'vehicles queued' } },
-      },
-    },
-    plugins: [rushBand],
-  });
+  const cell = (label, v, unit = '%') => {
+    if (v == null) return `<div class="stat"><span>${label}</span><b>—</b></div>`;
+    const cls = v < -0.5 ? 'good' : v > 0.5 ? 'bad' : '';
+    return `<div class="stat"><span>${label}</span><b class="${cls}">${v > 0 ? '+' : '−'}${Math.abs(v).toFixed(0)}${unit}</b></div>`;
+  };
+  const fb = S.frame.sims[base].m, fa = S.frame.sims.adaptive.m;
+  const amb = fb.amb_last_trip_s != null && fa.amb_last_trip_s != null ? fa.amb_last_trip_s - fb.amb_last_trip_s : null;
+  $('hero').innerHTML = cell('Delay', pct('delay')) + cell('CO₂', pct('co2')) +
+    (amb != null ? cell('Ambulance', amb, ' s') : cell('Stops', pct('stops'))) +
+    `<div class="vs">CivicSignal vs <b style="color:${STRAT[base].color}">${STRAT[base].label}</b> · ${S.win === 'all' ? 'since start' : 'last 2 min'} · same cars, same seed</div>`;
+
+  // back-of-envelope yearly impact, from this run's rate
+  const t = S.frame.t;
+  if (t < 300) { $('annual').hidden = true; return; }
+  const k = (RUSH_HOURS_PER_YEAR * 3600) / t;
+  const hours = ((fb.halt_vs - fa.halt_vs) / 3600) * k;
+  const tons = ((fb.co2_kg - fa.co2_kg) / 1000) * k;
+  const gal = ((fb.fuel_l - fa.fuel_l) / L_PER_GAL) * k;
+  const n = S.net.meta.expected_tls;
+  const f = (x) => Math.round(x).toLocaleString();
+  $('annual').hidden = false;
+  $('annual').innerHTML = `<h4>If these ${n} signals ran CivicSignal every weekday rush (2 h × 250 days)</h4>
+    <div class="grid">
+      <div><b>${f(hours)}</b><small>hours of waiting saved / yr</small></div>
+      <div><b>${f(tons)} t</b><small>CO₂ avoided / yr</small></div>
+      <div><b>${f(gal)}</b><small>gallons of fuel / yr</small></div>
+      <div><b>$${f(gal * USD_PER_GAL)}</b><small>fuel cost saved / yr</small></div>
+    </div><small>vs ${STRAT[base].label}, scaled from this run's rate. Back-of-envelope, not a forecast.</small>`;
 }
 
-function resetChart() {
-  for (const ds of chart.data.datasets) ds.data = [];
-  qwin.f = []; qwin.a = [];
-  app.lastChartT = -Infinity;
-  chart.update('none');
-}
-
-let chartDirty = false;
-const qwin = { f: [], a: [] };
-const mean = (xs) => xs.reduce((s, x) => s + x, 0) / xs.length;
-function pushChart(t, f, a) {
-  qwin.f.push(f.queue); qwin.a.push(a.queue);
-  if (qwin.f.length > QUEUE_SMOOTH) { qwin.f.shift(); qwin.a.shift(); }
-  if (t - app.lastChartT < CHART_EVERY) return;
-  app.lastChartT = t;
-  const [d0, d1, d2, d3] = chart.data.datasets;
-  d0.data.push({ x: t, y: f.idle_co2_kg }); d1.data.push({ x: t, y: a.idle_co2_kg });
-  d2.data.push({ x: t, y: mean(qwin.f) });  d3.data.push({ x: t, y: mean(qwin.a) });
-  chartDirty = true;
-}
-setInterval(() => { if (chartDirty) { chart.update('none'); chartDirty = false; } }, 250);
-
-// ---------------------------------------------------------------- controls
-function buildSliders() {
+// ================================================================ policy panel
+function buildPolicy() {
+  $('presets').innerHTML = Object.keys(PRESETS).map((k) => `<button data-preset="${k}">${k}</button>`).join('');
   $('sliders').innerHTML = SLIDERS.map((s) => `
     <div class="slider">
       <label for="w-${s.key}">${s.label}<small>${s.sub}</small></label>
-      <input type="range" id="w-${s.key}" min="0" max="3" step="0.25" value="${app.weights[s.key]}">
-      <output id="o-${s.key}">${app.weights[s.key].toFixed(2)}</output>
+      <input type="range" id="w-${s.key}" min="0" max="3" step="0.25">
+      <output id="o-${s.key}"></output>
     </div>`).join('');
   for (const s of SLIDERS) {
-    $(`w-${s.key}`).addEventListener('input', (e) => {
-      app.weights[s.key] = Number(e.target.value);
-      syncControls();
-      sendWeights();
-    });
+    $(`w-${s.key}`).addEventListener('input', (e) => { S.weights[s.key] = Number(e.target.value); syncPolicy(); sendWeights(); });
   }
+  for (const b of document.querySelectorAll('[data-preset]')) {
+    b.addEventListener('click', () => { Object.assign(S.weights, PRESETS[b.dataset.preset]); syncPolicy(); sendWeights(); });
+  }
+  $('preempt').addEventListener('change', (e) => { S.weights.preempt = e.target.checked; sendWeights(); });
+  $('copilot-ask').addEventListener('click', askCopilot);
+  $('copilot-text').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) askCopilot(); });
 }
 
-function syncControls() {
+function syncPolicy() {
   for (const s of SLIDERS) {
-    const el = $(`w-${s.key}`), v = app.weights[s.key];
-    el.value = v;
-    el.style.setProperty('--fill', `${(v / 3) * 100}%`);
-    $(`o-${s.key}`).textContent = v.toFixed(2);
+    const v = S.weights[s.key];
+    $(`w-${s.key}`).value = v;
+    $(`w-${s.key}`).style.setProperty('--fill', `${(v / 3) * 100}%`);
+    $(`o-${s.key}`).textContent = Number(v).toFixed(2);
   }
-  $('preempt').checked = app.weights.preempt;
+  $('preempt').checked = S.weights.preempt;
   for (const b of document.querySelectorAll('[data-preset]')) {
     const p = PRESETS[b.dataset.preset];
-    b.classList.toggle('active', Object.keys(p).every((k) => p[k] === app.weights[k]));
+    b.classList.toggle('active', Object.keys(p).every((k) => p[k] === S.weights[k]));
   }
-  $('play').textContent = app.playing ? '❚❚ Pause' : '▶ Play';
-  const sel = $('speed');
-  if (![...sel.options].some((o) => Number(o.value) === app.sps)) {
-    sel.add(new Option(`${app.sps / 10}×`, app.sps));
-  }
-  sel.value = String(app.sps);
 }
 
 let weightTimer = null;
 function sendWeights() {
   clearTimeout(weightTimer);
-  weightTimer = setTimeout(() => send({ type: 'weights', ...app.weights }), 60);
+  weightTimer = setTimeout(() => send({ type: 'weights', ...S.weights }), 60);
 }
 
-function send(msg) {
-  if (app.ws && app.ws.readyState === WebSocket.OPEN) app.ws.send(JSON.stringify(msg));
-}
-
-function togglePlay() {
-  app.playing = !app.playing;
-  if (REPLAY) replay.setPlaying(app.playing);
-  else send({ type: 'control', action: app.playing ? 'play' : 'pause' });
-  syncControls();
-}
-
-function dispatchAmbulance() {
-  if (REPLAY) return;
-  send({ type: 'ambulance' });
-  const btn = $('ambulance');
-  btn.disabled = true;
-  setTimeout(() => (btn.disabled = false), 1500);
-}
-
-function wireControls() {
-  $('play').addEventListener('click', togglePlay);
-  $('reset').addEventListener('click', () => {
-    if (REPLAY) replay.restart(); else send({ type: 'control', action: 'reset' });
-  });
-  $('speed').addEventListener('change', (e) => {
-    app.sps = Number(e.target.value);
-    if (!REPLAY) send({ type: 'speed', sps: app.sps });
-  });
-  $('preempt').addEventListener('change', (e) => { app.weights.preempt = e.target.checked; sendWeights(); });
-  $('ambulance').addEventListener('click', dispatchAmbulance);
-  for (const b of document.querySelectorAll('[data-preset]')) {
-    b.addEventListener('click', () => {
-      Object.assign(app.weights, PRESETS[b.dataset.preset]);
-      syncControls();
-      sendWeights();
-    });
+async function askCopilot() {
+  const text = $('copilot-text').value.trim();
+  if (!text) return;
+  $('copilot-status').textContent = 'Thinking…';
+  $('copilot-ask').disabled = true;
+  try {
+    const res = await fetch('/api/copilot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+    const plan = await res.json();
+    if (!res.ok) throw new Error(plan.error || res.status);
+    $('copilot-status').textContent = `via ${plan.model}`;
+    const ev = plan.event && plan.event !== 'none' ? plan.event : null;
+    const evLabel = { ambulance: '🚑 ambulance', surge: '🎭 crowd surge', crash: '💥 crash' }[ev];
+    const out = $('copilot-out');
+    out.hidden = false;
+    out.innerHTML = `<h5>${escapeHtml(plan.title)}</h5><div>${escapeHtml(plan.explanation)}</div>
+      <div class="chips">${SLIDERS.map((s) => `<span class="chip">${s.label} ${Number(plan[s.key]).toFixed(2)}</span>`).join('')}
+      <span class="chip">Preemption ${plan.preempt ? 'on' : 'off'}</span></div>
+      <div class="copilot-row"><button class="btn btn-primary" id="cp-apply">Apply policy</button>
+      ${ev ? `<button class="btn" id="cp-apply-ev">Apply + simulate ${evLabel}</button>` : ''}</div>`;
+    const apply = () => {
+      for (const s of SLIDERS) S.weights[s.key] = Number(plan[s.key]);
+      S.weights.preempt = !!plan.preempt;
+      syncPolicy(); sendWeights();
+      addLog(`Policy applied: <b>${escapeHtml(plan.title)}</b>`);
+      toast(`✨ Policy applied: <b>${escapeHtml(plan.title)}</b>`);
+    };
+    $('cp-apply').onclick = apply;
+    if (ev) $('cp-apply-ev').onclick = () => { apply(); fireEvent(ev); };
+  } catch (err) {
+    $('copilot-status').textContent = `Copilot unavailable: ${err.message}`;
+  } finally {
+    $('copilot-ask').disabled = false;
   }
-  document.addEventListener('keydown', (e) => {
-    if (e.target.tagName === 'INPUT' && e.target.type !== 'range') return;
-    if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
-    if (e.key === 'a' || e.key === 'A') dispatchAmbulance();
-  });
 }
 
-// ---------------------------------------------------------------- toasts
+function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+// ================================================================ events panel
+function eventLabels() {
+  const m = S.net.meta;
+  $('ev-amb-label').textContent = m.ambulance ? m.ambulance.label : '';
+  $('ev-surge-label').textContent = m.surge ? `${m.surge.label} · ${m.surge.n} cars over ${Math.round(m.surge.over_s / 60)} min` : '';
+  $('ev-crash-label').textContent = m.crash ? `${m.crash.label} · ${m.crash.lanes.length} lanes for ${Math.round(m.crash.duration / 60)} min` : '';
+}
+
+function fireEvent(name) {
+  if (REPLAY) return;
+  send({ type: 'event', name });
+  const btn = document.querySelector(`[data-event="${name}"]`);
+  if (btn) { btn.disabled = true; setTimeout(() => (btn.disabled = false), 1500); }
+}
+
+function addLog(html) {
+  const t = S.frame ? mmss(S.frame.t) : '0:00';
+  S.log.unshift(`<li><time>${t}</time>${html}</li>`);
+  S.log = S.log.slice(0, 30);
+  $('log').innerHTML = S.log.join('');
+}
+
+function handleEvents(frame) {
+  for (const ev of frame.events || []) {
+    if (ev === 'ambulance_spawned') {
+      S.race = { t0: frame.t, done: {} };
+      toast(`🚑 <b>Ambulance dispatched</b> in every city, same route: ${escapeHtml(S.net.meta.ambulance.label)}`, 'amb');
+      addLog('🚑 Ambulance dispatched');
+    } else if (ev.startsWith('ambulance_arrived_')) {
+      const sid = ev.replace('ambulance_arrived_', '');
+      const trip = frame.sims[sid].m.amb_last_trip_s;
+      if (S.race) S.race.done[sid] = trip;
+      toast(`<b style="color:${STRAT[sid].color}">${STRAT[sid].label}</b> ambulance arrived in <b>${mmss(trip)}</b>`, sid === 'adaptive' ? '' : 'warn');
+      addLog(`🏥 <b style="color:${STRAT[sid].color}">${STRAT[sid].label}</b> ambulance arrived: ${mmss(trip)}`);
+    } else if (ev === 'surge_started') {
+      toast(`🎭 <b>${escapeHtml(S.net.meta.surge.label)}</b>: ${S.net.meta.surge.n} cars pour out`, 'warn');
+      addLog(`🎭 ${escapeHtml(S.net.meta.surge.label)}`);
+    } else if (ev === 'crash_started') {
+      toast(`💥 <b>${escapeHtml(S.net.meta.crash.label)}</b>: lanes blocked for ${Math.round(S.net.meta.crash.duration / 60)} min`, 'warn');
+      addLog(`💥 ${escapeHtml(S.net.meta.crash.label)}`);
+    } else if (ev === 'sim_end') {
+      toast('Simulation finished. Press ↺ to run again.');
+    }
+  }
+}
+
+function renderRace() {
+  const r = S.race;
+  if (!r) { $('race').hidden = true; return; }
+  const times = S.panes.map((sid) => {
+    const m = S.frame.sims[sid].m;
+    if (r.done[sid] != null) return [sid, r.done[sid], true];
+    return [sid, m.amb_active ? m.amb_elapsed_s : S.frame.t - r.t0, false];
+  });
+  const max = Math.max(60, ...times.map((x) => x[1]));
+  $('race').hidden = false;
+  $('race').innerHTML = `<h4>🚑 Ambulance race · same route, same second</h4>` + times.map(([sid, t, done]) => `
+    <div class="lane" style="--accent:${STRAT[sid].color}"><span>${STRAT[sid].label}</span>
+    <div class="bar"><i style="width:${(t / max) * 100}%"></i></div><span class="t">${done ? '🏥 ' : ''}${mmss(t)}</span></div>`).join('');
+}
+
+// ================================================================ inspector
+function setInspect(tls) {
+  S.inspect = tls;
+  send({ type: 'inspect', tls });
+  showTab('inspect');
+  S.dirty = true;
+}
+
+function renderInspect(data) {
+  if (!S.inspect || !data) {
+    if (!S.inspect) $('inspect-title').textContent = 'Click any intersection';
+    return;
+  }
+  const any = Object.values(data).find(Boolean);
+  if (!any) { $('inspect').innerHTML = '<p class="note">That light is not one of the controlled intersections.</p>'; return; }
+  const names = [...new Set(any.approaches.map((a) => short(a.name)))];
+  $('inspect-title').textContent = names.join(' & ');
+  let html = '';
+  for (const sid of S.panes) {
+    const d = data[sid];
+    if (!d) continue;
+    const st = STRAT[sid];
+    html += `<div class="ins-pane" style="--accent:${st.color}"><h4>${st.label}<span>${d.program ? `program ${d.program}` : 'CivicSignal'}</span></h4>`;
+    for (const a of d.approaches) {
+      html += `<div class="appr"><span class="light ${a.signal}"></span><span>${short(a.name)}</span>
+        <small>${a.queue} queued · ${a.moving} moving${a.buses ? ` · 🚌${a.buses}` : ''}${a.max_wait_s ? ` · ${a.max_wait_s}s wait` : ''}${a.ambulance_m != null ? ` · 🚑 ${Math.round(a.ambulance_m)} m` : ''}</small></div>`;
+    }
+    if (d.controller) {
+      const c = d.controller;
+      html += `<div class="why"><b>Why:</b> ${escapeHtml(c.reason)}</div>`;
+      const maxTot = Math.max(1, ...c.options.map((o) => Object.values(o.terms).reduce((s, v) => s + Math.max(0, v), 0)));
+      for (const o of c.options) {
+        const serves = o.serves.map(short).join(' + ');
+        html += `<div class="opt ${o.current ? 'cur' : ''}"><div class="row"><span>${o.current ? 'Green now: ' : o.target ? 'Switching to: ' : ''}${serves}</span><b>score ${o.total.toFixed(1)}</b></div>
+          <div class="stack">${Object.entries(o.terms).map(([k, v]) => v > 0 ? `<i style="width:${(v / maxTot) * 100}%;background:${TERM_COLORS[k]}" title="${k} ${v}"></i>` : '').join('')}</div>
+          <div class="terms">${Object.entries(o.terms).filter(([, v]) => v !== 0).map(([k, v]) => `<span style="color:${TERM_COLORS[k]}">${k} ${v > 0 ? '+' : '−'}${Math.abs(v).toFixed(1)}</span>`).join(' ') || '<span class="muted">nothing waiting</span>'}</div></div>`;
+      }
+      html += `<div class="legend">${Object.entries(TERM_COLORS).map(([k, c]) => `<span><i style="background:${c}"></i>${k}</span>`).join('')}</div>
+        <small class="muted">Switches when another green beats the current one by ${c.hyst}, after ${c.min_green} s minimum green; ${c.max_green} s maximum.</small>`;
+    } else {
+      html += `<div class="note">${st.how}${d.next_switch_s != null ? ` Next switch in <b>${Math.max(0, d.next_switch_s)} s</b>, whoever is waiting.` : ''}</div>`;
+    }
+    html += '</div>';
+  }
+  $('inspect').innerHTML = html;
+}
+
+// ================================================================ follow a commuter
+function setFollow(vid) {
+  S.follow = vid;
+  for (const sid of S.panes) S.last[sid] = null;
+  S.dirty = true;
+}
+
+function trackVehicles(frame) {
+  for (const sid of S.panes) {
+    const sim = frame.sims[sid];
+    if (!sim) continue;
+    const seen = S.seen[sid];
+    let present = false;
+    for (const v of sim.veh) {
+      if (!seen.has(v[0])) seen.set(v[0], frame.t);
+      if (v[0] === S.follow) present = true;
+    }
+    if (S.follow) {
+      const rec = S.last[sid] || (S.last[sid] = { present: false, end: null });
+      if (present) rec.present = true, rec.end = null;
+      else if (rec.present && rec.end == null) rec.end = frame.t;
+    }
+  }
+}
+
+function renderFollow() {
+  const box = $('follow');
+  if (!S.follow || !S.frame) { box.hidden = true; return; }
+  box.hidden = false;
+  const parts = S.panes.map((sid) => {
+    const start = S.seen[sid].get(S.follow);
+    const rec = S.last[sid];
+    let txt = '—';
+    if (start != null) {
+      if (rec && rec.end != null) txt = `🏁 ${mmss(rec.end - start)}`;
+      else txt = `${mmss(S.frame.t - start)}`;
+    }
+    return `<span style="color:${STRAT[sid].color}">${STRAT[sid].label}</span> <b>${txt}</b>`;
+  });
+  box.innerHTML = `<span>🚗 Following one driver</span>${parts.join(' · ')}<span class="fx" title="Stop following">✕</span>`;
+  box.querySelector('.fx').onclick = () => { S.follow = null; box.hidden = true; };
+}
+
+// ================================================================ chart
+let chart, chartDirty = false;
+const qwin = {};
+function buildChart() {
+  if (chart) chart.destroy();
+  if (VIEW) return;
+  const rush = S.net.meta.rush || [600, 1800];
+  const end = S.net.meta.end || 2400;
+  const rushBand = {
+    id: 'rush',
+    beforeDatasetsDraw(c) {
+      const { ctx, chartArea: a, scales: { x } } = c;
+      const l = x.getPixelForValue(rush[0]), r = x.getPixelForValue(rush[1]);
+      ctx.save(); ctx.fillStyle = 'rgba(245,165,36,0.06)'; ctx.fillRect(l, a.top, r - l, a.bottom - a.top);
+      ctx.fillStyle = 'rgba(245,165,36,0.55)'; ctx.font = '600 10px system-ui, sans-serif'; ctx.fillText('RUSH HOUR', l + 6, a.top + 12);
+      ctx.restore();
+    },
+  };
+  const ds = [];
+  for (const sid of S.panes) {
+    ds.push({ label: STRAT[sid].label, data: [], borderColor: STRAT[sid].color, backgroundColor: STRAT[sid].color, yAxisID: 'co2', borderWidth: 2.4, pointRadius: 0, tension: 0.25 });
+    qwin[sid] = [];
+  }
+  for (const sid of S.panes) {
+    ds.push({ label: `${STRAT[sid].label} queue`, data: [], borderColor: STRAT[sid].color + 'aa', yAxisID: 'q', borderWidth: 1.3, borderDash: [5, 4], pointRadius: 0, tension: 0.25 });
+  }
+  Chart.defaults.color = '#8494ad';
+  Chart.defaults.font.family = 'ui-sans-serif, system-ui, -apple-system, sans-serif';
+  chart = new Chart($('chart'), {
+    type: 'line', data: { datasets: ds },
+    options: {
+      animation: false, parsing: false, normalized: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'right', labels: { boxWidth: 12, boxHeight: 3, padding: 8, filter: (i) => i.datasetIndex < S.panes.length } },
+                 tooltip: { callbacks: { title: (it) => mmss(it[0].parsed.x) } } },
+      scales: {
+        x: { type: 'linear', min: 0, max: end, grid: { color: '#192130' }, ticks: { stepSize: 300, callback: (v) => `${v / 60} min` } },
+        co2: { position: 'left', beginAtZero: true, grid: { color: '#192130' }, title: { display: true, text: 'kg CO₂ idling' } },
+        q: { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false }, title: { display: true, text: 'queued' } },
+      },
+    },
+    plugins: [rushBand],
+  });
+  S.lastChartT = -Infinity;
+}
+
+function pushChart(t, mBySid) {
+  if (!chart) return;
+  const n = S.panes.length;
+  S.panes.forEach((sid, i) => {
+    const m = mBySid[sid];
+    if (!m) return;
+    qwin[sid].push(m.queue);
+    if (qwin[sid].length > QUEUE_SMOOTH) qwin[sid].shift();
+  });
+  if (t - S.lastChartT < CHART_EVERY) return;
+  S.lastChartT = t;
+  S.panes.forEach((sid, i) => {
+    const m = mBySid[sid];
+    if (!m) return;
+    chart.data.datasets[i].data.push({ x: t, y: m.idle_co2_kg });
+    const q = qwin[sid];
+    chart.data.datasets[n + i].data.push({ x: t, y: q.reduce((s, x) => s + x, 0) / q.length });
+  });
+  chartDirty = true;
+}
+setInterval(() => { if (chart && chartDirty) { chart.update('none'); chartDirty = false; } }, 300);
+
+// ================================================================ frames & state
+function onFrame(frame, quiet = false) {
+  if (frame.t < S.lastT) { buildChart(); S.snaps = []; S.race = null; }
+  S.lastT = frame.t;
+  S.frame = frame;
+  S.dirty = true;
+  const mBySid = {};
+  for (const sid of S.panes) if (frame.sims[sid]) mBySid[sid] = frame.sims[sid].m;
+  S.snaps.push({ t: frame.t, m: mBySid });
+  while (S.snaps.length && frame.t - S.snaps[0].t > WINDOW_KEEP) S.snaps.shift();
+  pushChart(frame.t, mBySid);
+  trackVehicles(frame);
+  let mx = 0;
+  for (const sid of S.panes) {
+    const h = frame.sims[sid] && frame.sims[sid].heat;   // sent every 5th frame; keep the latest
+    if (h) { S.heatData[sid] = h; for (const k in h) mx = Math.max(mx, h[k]); }
+  }
+  if (mx) S.heatMax = 0.9 * S.heatMax + 0.1 * Math.max(4, mx);
+  if (!quiet) handleEvents(frame);
+  if (frame.inspect) S.pendingInspect = frame.inspect;
+}
+
+async function onState(st) {
+  S.state = st;
+  Object.assign(S.weights, st.weights);
+  S.playing = st.playing;
+  S.sps = st.sps;
+  S.inspect = st.inspect || null;   // shared across windows: a pop-out inspector follows clicks anywhere
+  const sel = $('scenario');
+  if (sel.options.length !== Object.keys(st.scenarios).length) {
+    sel.innerHTML = Object.entries(st.scenarios).map(([id, s]) => `<option value="${id}">${s.title}</option>`).join('');
+  }
+  sel.value = st.scenario;
+  const lay = $('layout'), key = st.panes.join(',');
+  if (![...lay.options].some((o) => o.value === key)) lay.add(new Option(st.panes.map((p) => STRAT[p].label).join(' vs '), key));
+  lay.value = key;
+  if (st.scenario !== S.scenario || key !== S.panes.join(',')) await buildPanes(st.scenario, st.panes);
+  $('copilot-ask').disabled = !st.copilot;
+  if (!st.copilot) $('copilot-status').textContent = 'Add GEMINI_API_KEY to .env and restart the server to enable.';
+  else if ($('copilot-status').textContent.startsWith('Add')) $('copilot-status').textContent = '';
+  syncControls();
+  syncPolicy();
+}
+
+function onHistory(h) {
+  if (h.scenario !== S.scenario) return;
+  buildChart();
+  for (const [t, panes] of h.points) {
+    const m = {};
+    for (const sid in panes) m[sid] = { idle_co2_kg: panes[sid][0], queue: panes[sid][1] };
+    pushChart(t, m);
+  }
+  S.lastT = h.points.length ? h.points[h.points.length - 1][0] : -1;
+}
+
+function syncControls() {
+  $('play').textContent = S.playing ? '❚❚ Pause' : '▶ Play';
+  const sp = $('speed');
+  if (![...sp.options].some((o) => Number(o.value) === S.sps)) sp.add(new Option(`${S.sps / 10}×`, S.sps));
+  sp.value = String(S.sps);
+  $('heat').classList.toggle('on', S.heat);
+}
+
+function render(now) {
+  if (S.frame && S.net) {
+    for (const sid of S.panes) if (S.views[sid]) S.views[sid].draw(S.frame.sims[sid], now);
+    if (S.dirty) {
+      const t = S.frame.t, rush = S.net.meta.rush || [600, 1800];
+      $('clock').textContent = mmss(t);
+      const inRush = t >= rush[0] && t < rush[1];
+      $('phase').textContent = inRush ? 'Rush hour' : t < rush[0] ? 'Off-peak' : 'Evening';
+      $('phase').classList.toggle('rush', inRush);
+      for (const sid of S.panes) {
+        const m = S.frame.sims[sid] && S.frame.sims[sid].m;
+        if (!m) continue;
+        let s = `queued <b>${m.queue}</b> · moving <b>${Math.max(0, m.running - m.queue)}</b> · delay <b>${m.avg_delay_s.toFixed(0)}s</b>`;
+        if (m.amb_active) s += ` · <span class="amb">🚑 ${mmss(m.amb_elapsed_s)}</span>`;
+        else if (m.amb_last_trip_s != null) s += ` · <span class="ok">🏥 ${mmss(m.amb_last_trip_s)}</span>`;
+        const el = $(`stat-${sid}`);
+        if (el) el.innerHTML = s;
+      }
+      renderImpactThrottled();
+      renderRace();
+      renderFollow();
+      if (S.pendingInspect) { renderInspect(S.pendingInspect); S.pendingInspect = null; }
+      S.dirty = false;
+    }
+  }
+  requestAnimationFrame(render);
+}
+
+let impactAt = 0;
+function renderImpactThrottled() {
+  const now = performance.now();
+  if (now - impactAt < 400) return;
+  impactAt = now;
+  renderImpact();
+}
+
+// ================================================================ ui plumbing
+function send(msg) { if (S.ws && S.ws.readyState === WebSocket.OPEN) S.ws.send(JSON.stringify(msg)); }
+
+function showTab(name) {
+  for (const b of document.querySelectorAll('.tabs button')) b.classList.toggle('active', b.dataset.tab === name);
+  for (const t of document.querySelectorAll('.tab')) t.hidden = t.id !== `tab-${name}`;
+}
+
 function toast(html, kind = '') {
   const el = document.createElement('div');
   el.className = `toast ${kind}`;
   el.innerHTML = html;
   $('toasts').appendChild(el);
-  setTimeout(() => el.remove(), 5200);
+  setTimeout(() => el.remove(), 5500);
 }
 
-function handleEvents(frame) {
-  const { fixed: f, adaptive: a } = frame.sims;
-  for (const ev of frame.events || []) {
-    if (ev === 'ambulance_spawned') toast('🚑 <b>Ambulance dispatched</b> in both cities, same route', 'amb');
-    if (ev === 'ambulance_arrived_adaptive')
-      toast(`<b style="color:${COLOR.adaptive}">CivicSignal</b> ambulance arrived in <b>${a.m.amb_last_trip_s.toFixed(0)} s</b>`);
-    if (ev === 'ambulance_arrived_fixed')
-      toast(`<b style="color:${COLOR.fixed}">Fixed-time</b> ambulance arrived in <b>${f.m.amb_last_trip_s.toFixed(0)} s</b>`, 'fixed');
-    if (ev === 'sim_end') toast('Simulation finished. Press Reset to run again.');
-  }
-}
-
-// ---------------------------------------------------------------- frames
-function onFrame(frame, quiet = false) {
-  if (frame.t < app.lastT) resetChart();   // reset or replay restart
-  app.lastT = frame.t;
-  app.frame = frame;
-  app.dirty = true;
-  const { fixed: f, adaptive: a } = frame.sims;
-  pushChart(frame.t, f.m, a.m);
-  if (!quiet) handleEvents(frame);
-}
-
-function onHistory(points) {
-  resetChart();
-  for (const [t, fi, ai, fq, aq] of points) pushChart(t, { idle_co2_kg: fi, queue: fq }, { idle_co2_kg: ai, queue: aq });
-  app.lastT = points.length ? points[points.length - 1][0] : -1;
-}
-
-function onState(st) {
-  Object.assign(app.weights, st.weights);
-  app.playing = st.playing;
-  app.sps = st.sps;
+function togglePlay() {
+  S.playing = !S.playing;
+  if (REPLAY) replay.setPlaying(S.playing); else send({ type: 'control', action: S.playing ? 'play' : 'pause' });
   syncControls();
 }
 
-function render(now) {
-  if (app.frame) {
-    const { fixed: f, adaptive: a } = app.frame.sims;
-    views.fixed.draw(f, now);
-    views.adaptive.draw(a, now);
-    if (app.dirty) {
-      updateCards(f.m, a.m);
-      updateMapStats('fixed', f.m);
-      updateMapStats('adaptive', a.m);
-      const t = app.frame.t;
-      $('clock').textContent = mmss(t);
-      const rush = t >= RUSH[0] && t < RUSH[1];
-      $('phase').textContent = rush ? 'Rush hour' : t < RUSH[0] ? 'Off-peak' : 'Evening off-peak';
-      $('phase').classList.toggle('rush', rush);
-      app.dirty = false;
-    }
-  } else {
-    views.fixed.draw(null, now);
-    views.adaptive.draw(null, now);
+function wire() {
+  $('play').onclick = togglePlay;
+  $('reset').onclick = () => (REPLAY ? replay.restart() : send({ type: 'control', action: 'reset' }));
+  $('speed').onchange = (e) => { S.sps = Number(e.target.value); if (!REPLAY) send({ type: 'speed', sps: S.sps }); };
+  $('heat').onclick = () => { S.heat = !S.heat; syncControls(); };
+  $('scenario').onchange = (e) => send({ type: 'config', scenario: e.target.value, panes: S.panes });
+  $('layout').onchange = (e) => send({ type: 'config', scenario: S.scenario, panes: e.target.value.split(',') });
+  for (const b of document.querySelectorAll('.tabs button')) b.onclick = () => showTab(b.dataset.tab);
+  for (const b of document.querySelectorAll('[data-event]')) b.onclick = () => fireEvent(b.dataset.event);
+  for (const b of document.querySelectorAll('#window-seg button')) {
+    b.onclick = () => {
+      S.win = b.dataset.win;
+      for (const x of document.querySelectorAll('#window-seg button')) x.classList.toggle('active', x === b);
+      renderImpact();
+    };
   }
-  requestAnimationFrame(render);
+  for (const b of document.querySelectorAll('[data-pop]')) {
+    b.onclick = () => window.open(`/?view=${b.dataset.pop}`, `civicsignal-${b.dataset.pop}`, 'width=460,height=860');
+  }
+  document.addEventListener('keydown', (e) => {
+    if (['TEXTAREA', 'SELECT'].includes(e.target.tagName) || (e.target.tagName === 'INPUT' && e.target.type !== 'range')) return;
+    if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+    else if (e.key === 'a' || e.key === 'A') fireEvent('ambulance');
+    else if (e.key === 's' || e.key === 'S') fireEvent('surge');
+    else if (e.key === 'c' || e.key === 'C') fireEvent('crash');
+    else if (e.key === 'h' || e.key === 'H') { S.heat = !S.heat; syncControls(); }
+    else if (e.key === 'Escape') { S.follow = null; S.inspect = null; send({ type: 'inspect', tls: null }); renderFollow(); }
+  });
 }
 
-// ---------------------------------------------------------------- live server
+// ================================================================ live server
 function connect() {
   const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
-  app.ws = ws;
-  ws.onopen = () => {
-    app.connected = true;
-    $('conn').className = 'conn on';
-    $('banner').hidden = true;
-    if (params.has('autoplay')) {
-      if (params.has('sps')) send({ type: 'speed', sps: Number(params.get('sps')) });
-      send({ type: 'control', action: 'play' });
-    }
-  };
+  S.ws = ws;
+  ws.onopen = () => { $('conn').className = 'conn on'; $('banner').hidden = true; };
+  // handle messages strictly in order: a state message may await the map file before frames can draw on it
+  let chain = Promise.resolve();
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
-    if (msg.type === 'frame') onFrame(msg);
-    else if (msg.type === 'state') onState(msg);
-    else if (msg.type === 'history') onHistory(msg.points);
+    chain = chain.then(async () => {
+      if (msg.type === 'frame') { if (msg.scenario === S.scenario && S.net) onFrame(msg); }
+      else if (msg.type === 'state') await onState(msg);
+      else if (msg.type === 'history') { if (S.net) onHistory(msg); }
+    }).catch((err) => console.error(err));
   };
   ws.onclose = () => {
-    app.connected = false;
     $('conn').className = 'conn off';
-    const b = $('banner');
-    b.innerHTML = 'Not connected to the sim server. Run <code>python server.py</code>, or open the backup: '
-      + '<a href="?replay=/recordings/demo.jsonl" style="color:#fff">replay</a>. Retrying…';
-    b.hidden = false;
+    $('banner').innerHTML = 'Not connected to the sim server. Run <code>python server.py</code>. Retrying…';
+    $('banner').hidden = false;
     setTimeout(connect, 1500);
   };
 }
 
-// ---------------------------------------------------------------- replay mode
+// ================================================================ replay mode
 const replay = {
   lines: [], i: 0, timer: null,
   async load(url) {
-    $('mode').hidden = false;
-    $('conn').hidden = true;
-    $('ambulance').disabled = true;
-    $('ambulance').title = 'Replay mode: the ambulance in this recording is already scheduled';
-    for (const s of SLIDERS) $(`w-${s.key}`).disabled = true;
-    $('preempt').disabled = true;
-    for (const b of document.querySelectorAll('[data-preset]')) b.disabled = true;
+    $('mode').hidden = false; $('conn').hidden = true;
+    for (const el of document.querySelectorAll('[data-event], #scenario, #layout, #copilot-ask')) el.disabled = true;
     const res = await fetch(url);
     if (!res.ok) { toast(`Could not load replay ${url} (${res.status})`, 'amb'); return; }
     this.lines = (await res.text()).split('\n').filter(Boolean);
+    const first = JSON.parse(this.lines[0]);
+    if (first.type === 'state') { await onState({ ...first, playing: false }); this.lines.shift(); }
     toast(`Replay loaded: ${this.lines.length} frames`);
-    this.i = 0;
     this.seek(Number(params.get('t')) || 0);
-    if (params.has('autoplay')) { app.playing = true; syncControls(); this.setPlaying(true); }
+    if (params.has('autoplay')) { S.playing = true; syncControls(); this.setPlaying(true); }
   },
-  seek(t) {   // ?t=600 jumps to rush hour; the chart fills in silently on the way
+  seek(t) {
+    this.i = 0; buildChart(); S.snaps = []; S.lastT = -1;
     while (this.i < this.lines.length - 1) {
       const f = JSON.parse(this.lines[this.i]);
       if (f.t >= t) break;
-      onFrame(f, true);
-      this.i++;
+      onFrame(f, true); this.i++;
     }
     this.stepOnce();
   },
   stepOnce() {
-    if (this.i >= this.lines.length) { this.setPlaying(false); app.playing = false; syncControls(); return; }
+    if (this.i >= this.lines.length) { S.playing = false; syncControls(); return; }
     onFrame(JSON.parse(this.lines[this.i++]));
   },
   setPlaying(on) {
@@ -534,24 +939,20 @@ const replay = {
     const tick = () => {
       const t0 = performance.now();
       this.stepOnce();
-      if (app.playing) this.timer = setTimeout(tick, Math.max(0, 1000 / app.sps - (performance.now() - t0)));
+      if (S.playing) this.timer = setTimeout(tick, Math.max(0, 1000 / S.sps - (performance.now() - t0)));
     };
     tick();
   },
-  restart() { this.i = 0; this.seek(Number(params.get('t')) || 0); },
+  restart() { this.seek(Number(params.get('t')) || 0); },
 };
 
-// ---------------------------------------------------------------- boot
-async function boot() {
-  buildCards();
-  buildSliders();
-  buildChart();
-  wireControls();
-  syncControls();
-  const net = await (await fetch('net.json')).json();
-  app.net = net;
-  views.fixed.setNet(net);
-  views.adaptive.setNet(net);
+// ================================================================ boot
+function boot() {
+  buildPolicy();
+  wire();
+  if (VIEW) { document.body.classList.add('solo'); showTab(VIEW); }
+  else if (params.get('tab')) showTab(params.get('tab'));
+  if (params.has('heat')) { S.heat = true; syncControls(); }
   requestAnimationFrame(render);
   if (REPLAY) replay.load(REPLAY); else connect();
 }

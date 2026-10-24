@@ -22,6 +22,12 @@ PREEMPT_DIST_M = 300.0   # spec says 150; 300 lets lights ahead flush their queu
 # +3% total CO2; this one measured -10% total CO2 and -37% stops vs flow-only (2 seeds, climate=2.5).
 CLIMATE_IDLE_K = 0.0     # weight on idling CO2 (g/s) of halted vehicles
 CLIMATE_STOP_K = 1.0     # weight per moving vehicle a red would force to stop
+CLIMATE_OUT_K = 0.0      # discount a platoon by the queue already waiting downstream (spillback guard)
+
+TRANSIT_MOVING_K = 1.0   # transit signal priority: an approaching bus counts like a stopped one
+
+# CivicSignal's default city policy ("Balanced"): flow plus platoon protection. Used by the server and compare.py.
+BALANCED = dict(flow=1.0, climate=1.0, transit=0.5, fairness=0.0, preempt=True)
 
 _EMPTY = LaneObs()
 
@@ -44,6 +50,7 @@ class _Light:
     pairs: dict[str, list[tuple[str, str]]]   # green state -> unique (in, out) pairs it serves
     in_lanes: dict[str, list[str]]            # green state -> unique in-lanes it serves
     in_lanes_all: list[str]                   # every in-lane any green state serves
+    outs: dict[str, dict[str, list[str]]]     # green state -> in-lane -> out-lanes it feeds
     cur: str
     mode: str = "green"                       # green | yellow | allred
     since: float = 0.0
@@ -64,8 +71,9 @@ class WeightedMaxPressure:
             pairs[g] = list(dict.fromkeys(served))
             in_lanes[g] = list(dict.fromkeys(p[0] for p in served))
         all_in = list(dict.fromkeys(l for ls in in_lanes.values() for l in ls))
+        outs = {g: {a: [b for x, b in pairs[g] if x == a and b] for a in in_lanes[g]} for g in info.green_states}
         cur = info.initial_state if info.initial_state in info.green_states else info.green_states[0]
-        self.lights[info.tls_id] = _Light(info, pairs, in_lanes, all_in, cur, shown=cur)
+        self.lights[info.tls_id] = _Light(info, pairs, in_lanes, all_in, outs, cur, shown=cur)
 
     def score(self, tls_id: str, g: str, lanes: dict[str, LaneObs]) -> float:
         return sum(self.terms(tls_id, g, lanes).values())
@@ -78,8 +86,11 @@ class WeightedMaxPressure:
             flow += w.flow * (lanes.get(a, _EMPTY).halting - lanes.get(b, _EMPTY).halting)
         for a in light.in_lanes[g]:
             o = lanes.get(a, _EMPTY)
-            climate += w.climate * (CLIMATE_IDLE_K * o.co2_mg_s / 1000 + CLIMATE_STOP_K * o.approaching)
-            transit += w.transit * 5 * o.buses
+            outs = light.outs[g][a]
+            blocked = sum(lanes.get(b, _EMPTY).halting for b in outs) / len(outs) if outs else 0.0
+            climate += w.climate * (CLIMATE_IDLE_K * o.co2_mg_s / 1000
+                                    + CLIMATE_STOP_K * max(0.0, o.approaching - CLIMATE_OUT_K * blocked))
+            transit += w.transit * 5 * (o.buses + TRANSIT_MOVING_K * o.buses_moving)
             fairness += w.fairness * o.max_wait_s / 30
         return {"flow": flow, "climate": climate, "transit": transit, "fairness": fairness}
 

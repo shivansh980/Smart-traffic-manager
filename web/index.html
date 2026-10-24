@@ -12,81 +12,131 @@
       <span class="logo" aria-hidden="true"><i></i><i></i><i></i></span>
       <div>
         <h1>CivicSignal</h1>
-        <p>Adaptive traffic lights the city can steer</p>
+        <p>Traffic lights the city can steer</p>
       </div>
+    </div>
+
+    <div class="pickers">
+      <label class="pick">Map
+        <select id="scenario"></select>
+      </label>
+      <label class="pick">Compare
+        <select id="layout">
+          <option value="fixed,adaptive">Fixed-time vs CivicSignal</option>
+          <option value="actuated,adaptive">Actuated vs CivicSignal</option>
+          <option value="greenwave,adaptive">Green wave vs CivicSignal</option>
+          <option value="fixed,actuated,greenwave,adaptive">All four strategies</option>
+        </select>
+      </label>
     </div>
 
     <div class="clock">
       <span id="phase" class="phase">Off-peak</span>
-      <span class="time"><span id="clock">0:00</span><small> sim time</small></span>
+      <span class="time"><span id="clock">0:00</span></span>
     </div>
 
     <div class="transport">
-      <span id="mode" class="mode" hidden>Replay</span>
+      <span id="mode" class="badge" hidden>Replay</span>
       <button id="play" class="btn btn-primary" title="Play / pause (Space)">▶ Play</button>
-      <button id="reset" class="btn" title="Restart both simulations">↺ Reset</button>
-      <label class="speed">Speed
-        <select id="speed">
-          <option value="2">0.2×</option>
-          <option value="5">0.5×</option>
-          <option value="10" selected>1×</option>
-          <option value="20">2×</option>
-          <option value="50">5×</option>
-          <option value="100">10×</option>
-        </select>
-      </label>
+      <button id="reset" class="btn" title="Restart all simulations">↺</button>
+      <select id="speed" class="sel" title="Simulation speed">
+        <option value="5">0.5×</option>
+        <option value="10" selected>1×</option>
+        <option value="20">2×</option>
+        <option value="50">5×</option>
+        <option value="100">10×</option>
+      </select>
+      <button id="heat" class="btn btn-toggle" title="CO₂ heatmap (H)">🔥 Heat</button>
       <span id="conn" class="conn" title="Server connection"></span>
     </div>
   </header>
 
   <main class="layout">
-    <section class="map fixed" aria-label="Fixed-time simulation">
-      <div class="map-head">
-        <h2><span class="swatch"></span>Fixed-time <em>today</em></h2>
-        <span class="map-stat" id="stat-fixed"></span>
-      </div>
-      <div class="map-wrap"><canvas id="cv-fixed"></canvas></div>
+    <section class="stage">
+      <div class="panes" id="panes"></div>
+      <div class="follow" id="follow" hidden></div>
+      <section class="panel chart-panel">
+        <div class="panel-head">
+          <h3>Wasted idling CO₂ <span class="muted">(solid)</span> and queues <span class="muted">(dashed, 90 s avg)</span></h3>
+          <span class="hint" id="attribution"></span>
+        </div>
+        <div class="chart-wrap"><canvas id="chart"></canvas></div>
+      </section>
     </section>
 
-    <section class="map adaptive" aria-label="Adaptive simulation">
-      <div class="map-head">
-        <h2><span class="swatch"></span>CivicSignal <em>adaptive</em></h2>
-        <span class="map-stat" id="stat-adaptive"></span>
-      </div>
-      <div class="map-wrap"><canvas id="cv-adaptive"></canvas></div>
-    </section>
+    <aside class="sidebar">
+      <nav class="tabs" role="tablist">
+        <button data-tab="impact" class="active">Impact</button>
+        <button data-tab="policy">Policy</button>
+        <button data-tab="events">Events</button>
+        <button data-tab="inspect">Inspect</button>
+      </nav>
 
-    <section class="cards" id="cards" aria-label="Fixed vs adaptive"></section>
+      <section class="tab" id="tab-impact">
+        <div class="tab-head">
+          <div class="seg" id="window-seg">
+            <button data-win="all" class="active">Since start</button>
+            <button data-win="120">Last 2 min</button>
+          </div>
+          <button class="pop" data-pop="impact" title="Open in its own window">⧉</button>
+        </div>
+        <div id="hero" class="hero"></div>
+        <table class="score" id="score"></table>
+        <div id="annual" class="annual"></div>
+      </section>
 
-    <section class="panel chart-panel">
-      <div class="panel-head">
-        <h3>Wasted idling CO₂ and queues over time</h3>
-        <div class="legend-note"><span class="dash"></span> queue, 90 s average (right axis)</div>
-      </div>
-      <div class="chart-wrap"><canvas id="chart"></canvas></div>
-    </section>
-
-    <section class="panel controls">
-      <div class="panel-head">
-        <h3>What should the city optimize?</h3>
-        <span class="hint">Adaptive side only</span>
-      </div>
-      <div class="presets" id="presets">
-        <button data-preset="commute">Commute</button>
-        <button data-preset="climate">Climate</button>
-        <button data-preset="transit">Transit</button>
-        <button data-preset="fair">Fairness</button>
-      </div>
-      <div class="sliders" id="sliders"></div>
-      <div class="control-foot">
+      <section class="tab" id="tab-policy" hidden>
+        <div class="tab-head">
+          <h3>What should the city optimize?</h3>
+          <button class="pop" data-pop="policy" title="Open in its own window">⧉</button>
+        </div>
+        <p class="note">Steers the CivicSignal panes only. Every decision stays a formula you can audit: see Inspect.</p>
+        <div class="presets" id="presets"></div>
+        <div class="sliders" id="sliders"></div>
         <label class="toggle">
           <input type="checkbox" id="preempt" checked>
           <span class="track"><span class="knob"></span></span>
-          Emergency preemption
+          Emergency preemption (green corridors)
         </label>
-        <button id="ambulance" class="btn btn-amb" title="Dispatch in both cities (A)">🚑 Dispatch ambulance</button>
-      </div>
-    </section>
+        <div class="copilot">
+          <h4>✨ Policy copilot</h4>
+          <textarea id="copilot-text" rows="3" placeholder="e.g. Radio City lets out at 10pm. Keep 6th Ave moving, protect the buses, and don't let side streets wait forever."></textarea>
+          <div class="copilot-row">
+            <button id="copilot-ask" class="btn btn-primary">Ask copilot</button>
+            <span id="copilot-status" class="muted"></span>
+          </div>
+          <div id="copilot-out" class="copilot-out" hidden></div>
+        </div>
+      </section>
+
+      <section class="tab" id="tab-events" hidden>
+        <div class="tab-head">
+          <h3>Stress-test the city</h3>
+          <button class="pop" data-pop="events" title="Open in its own window">⧉</button>
+        </div>
+        <p class="note">Every event hits every pane at the same second, with identical vehicles.</p>
+        <div class="event-buttons">
+          <button class="ev ev-amb" data-event="ambulance"><b>🚑 Dispatch ambulance</b><span id="ev-amb-label"></span></button>
+          <button class="ev ev-surge" data-event="surge"><b>🎭 Crowd surge</b><span id="ev-surge-label"></span></button>
+          <button class="ev ev-crash" data-event="crash"><b>💥 Crash</b><span id="ev-crash-label"></span></button>
+        </div>
+        <div id="race" class="race" hidden></div>
+        <h4 class="log-title">Event log</h4>
+        <ol id="log" class="log"></ol>
+      </section>
+
+      <section class="tab" id="tab-inspect" hidden>
+        <div class="tab-head">
+          <h3 id="inspect-title">Click any intersection</h3>
+          <button class="pop" data-pop="inspect" title="Open in its own window">⧉</button>
+        </div>
+        <div id="inspect" class="inspect">
+          <p class="note">Click a light on any map to see what each strategy is doing there and <b>why</b>.
+            CivicSignal shows its full score: every green is a sum of the city's priorities, so any decision can be audited.</p>
+          <p class="note">Click a car to follow the same driver in every city.</p>
+        </div>
+      </section>
+    </aside>
   </main>
 
   <div id="banner" class="banner" hidden></div>

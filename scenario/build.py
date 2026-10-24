@@ -354,7 +354,7 @@ def build_midtown() -> None:
     crash_edge = next(e for e in st_pats.getOutgoing() if e.getName() == "5th Avenue")
 
     landmarks = [("Radio City", "6th Avenue", "50th Street"), ("St. Patrick's", "5th Avenue", "50th Street"),
-                 ("Rockefeller Ctr", "6th Avenue", "49th Street"), ("MoMA", "6th Avenue", "53rd Street"),
+                 ("MoMA", "6th Avenue", "53rd Street"),
                  ("Grand Central ↓", "Park Avenue", "47th Street")]
     lm = []
     for text, a, b in landmarks:

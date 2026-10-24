@@ -17,9 +17,11 @@ VARS = [tc.VAR_POSITION, tc.VAR_ANGLE, tc.VAR_TYPE, tc.VAR_SPEED, tc.VAR_CO2EMIS
         tc.VAR_WAITING_TIME, tc.VAR_LANE_ID, tc.VAR_LANEPOSITION,
         tc.VAR_NOXEMISSION, tc.VAR_PMXEMISSION, tc.VAR_FUELCONSUMPTION]
 HALT_SPEED = 0.1
+CHAIN_MAX_M = 250       # how far up/downstream of a signal a split approach is still counted (advance detection)
+PLATOON_SPEED = 0.1     # m/s: a vehicle at least this fast counts as "approaching" for the climate term
 KIND = {"bus": "b", "ambulance": "e", "crash": "x"}
 DT = 1.0
-HEAT_EVERY = 5          # steps between heatmap updates in the frame
+HEAT_EVERY = 1          # steps between heatmap updates in the frame (~2 KB per pane)
 HEAT_ALPHA = 0.05       # EMA weight per step (~20 s memory)
 FUEL_MG_PER_L = 745_000  # gasoline density
 
@@ -79,6 +81,32 @@ class SumoRunner:
         assert expected is None or len(self.tls) == expected, f"expected {expected} controllable lights, got {len(self.tls)}"
 
         self.obs_lanes = {l for info in self.tls for pair in info.links for l in pair if l}
+        # Advance detection: OSM often splits an approach into short segments at non-signal nodes. Each segment
+        # chained to a signal's in-lane (upstream) or out-lane (downstream) reports into that lane's observation,
+        # with its extra distance to the stop line, so a queue that spills past a 60 m segment is still seen.
+        self.group: dict[str, list[tuple[str, float]]] = {l: [(l, 0.0)] for l in self.obs_lanes}  # lane -> [(obs lane, offset m)]
+        tls_nodes = {info.tls_id for info in self.tls}
+        is_signal = lambda n: n.getID() in tls_nodes or n.getType() == "traffic_light"
+        for obs in self.obs_lanes:
+            edge = net.getEdge(obs.rsplit("_", 1)[0])
+            idx = int(obs.rsplit("_", 1)[1])
+            for upstream in (True, False):
+                e, off, seen = edge, 0.0, {edge.getID()}
+                while off <= CHAIN_MAX_M:
+                    node = e.getFromNode() if upstream else e.getToNode()
+                    if is_signal(node):
+                        break
+                    back = (e.getToNode() if upstream else e.getFromNode()).getID()   # skip the reverse direction
+                    cand = [x for x in (node.getIncoming() if upstream else node.getOutgoing())
+                            if (x.getFromNode() if upstream else x.getToNode()).getID() != back and x.getID() not in seen]
+                    if len(cand) != 1:
+                        break
+                    e = cand[0]
+                    seen.add(e.getID())
+                    if upstream:
+                        off += e.getLength()
+                    lane = f"{e.getID()}_{min(idx, e.getLaneNumber() - 1)}"
+                    self.group.setdefault(lane, []).append((obs, off if upstream else 0.0))
         self.links = {info.tls_id: info.links for info in self.tls}
         # incoming lane -> signal indices, per light (for the "sig" frame field)
         self.lane_idx = {info.tls_id: {} for info in self.tls}
@@ -203,6 +231,8 @@ class SumoRunner:
         veh, halted_n, co2, idle_co2, max_wait = [], 0, 0.0, 0.0, 0.0
         fuel = nox = pm = 0.0
         for vid, v in res.items():
+            if v[tc.VAR_CO2EMISSION] < 0:   # teleporting (gridlock): SUMO reports invalid sentinels, skip it
+                continue
             x, y = v[tc.VAR_POSITION]
             vtype = v[tc.VAR_TYPE]
             halted = v[tc.VAR_SPEED] < HALT_SPEED
@@ -228,23 +258,10 @@ class SumoRunner:
                 edge_co2[edge] = edge_co2.get(edge, 0.0) + rate
             if vtype == "ambulance" and self.controller is not None:
                 self._mark_corridor(vid, lanes)
-            o = lanes.get(lane)
-            if o is None:
-                continue
-            if halted:
-                o.halting += 1
-                o.co2_mg_s += rate
-                if vtype == "bus":
-                    o.buses += 1
-            else:
-                o.approaching += 1
-            o.max_wait_s = max(o.max_wait_s, wait)
-            if vtype == "ambulance":
-                d = self.lane_len[lane] - v[tc.VAR_LANEPOSITION]
-                if o.emergency_dist_m is None or d < o.emergency_dist_m:
-                    o.emergency_dist_m = d
+            for obs_lane, offset in self.group.get(lane, ()):
+                self._observe(lanes[obs_lane], v, vtype, halted, rate, wait, lane, offset)
 
-        running = sum(1 for v in res.values() if v[tc.VAR_TYPE] != "crash")
+        running = sum(1 for v in res.values() if v[tc.VAR_TYPE] != "crash" and v[tc.VAR_CO2EMISSION] >= 0)
         self.halt_vs += halted_n * DT
         self.veh_s += running * DT
         self.co2_kg += co2 * DT / 1e6
@@ -304,6 +321,24 @@ class SumoRunner:
         if self.steps % HEAT_EVERY == 0:
             frame["heat"] = {e: round(h, 2) for e, h in self.heat.items() if h >= 0.01}
         return frame
+
+    def _observe(self, o: LaneObs, v: dict, vtype: str, halted: bool, rate: float, wait: float,
+                 lane: str, offset: float) -> None:
+        if halted:
+            o.halting += 1
+            o.co2_mg_s += rate
+            if vtype == "bus":
+                o.buses += 1
+        else:
+            if v[tc.VAR_SPEED] >= PLATOON_SPEED:
+                o.approaching += 1
+            if vtype == "bus":
+                o.buses_moving += 1
+        o.max_wait_s = max(o.max_wait_s, wait)
+        if vtype == "ambulance":
+            d = self.lane_len[lane] - v[tc.VAR_LANEPOSITION] + offset
+            if o.emergency_dist_m is None or d < o.emergency_dist_m:
+                o.emergency_dist_m = d
 
     # ------------------------------------------------------------------ inspector
 

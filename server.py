@@ -22,7 +22,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketDisconnected
 
-from core.controller import WeightedMaxPressure
+from core.controller import BALANCED, WeightedMaxPressure
 from core.sumo_runner import PROGRAMS, SumoRunner
 from core.types import Weights
 
@@ -37,7 +37,6 @@ STRATEGIES = {
     "greenwave": {"label": "Green wave", "sub": "timed progression"},
     "adaptive": {"label": "CivicSignal", "sub": "adaptive, city-steered"},
 }
-BALANCED = dict(flow=1.0, climate=1.0, transit=0.0, fairness=0.0, preempt=True)   # CivicSignal's default policy
 
 
 def scenarios() -> dict[str, dict]:
@@ -168,7 +167,8 @@ class Sim:
         return {"type": "state", "weights": asdict(self.weights), "playing": self.playing, "sps": self.sps,
                 "t": self.t, "done": self.done, "scenario": self.scenario, "panes": self.panes,
                 "scenarios": {k: {x: v[x] for x in ("title", "subtitle", "rush", "end")} for k, v in scenarios().items()},
-                "strategies": STRATEGIES, "balanced": BALANCED, "copilot": bool(gemini_key())}
+                "strategies": STRATEGIES, "balanced": BALANCED, "copilot": bool(gemini_key()),
+                "inspect": self.inspect_tls}
 
 
 # ------------------------------------------------------------------ policy copilot (Gemini)
