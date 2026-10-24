@@ -351,6 +351,9 @@ slides, presenting while the builder drives the demo). Nothing on the build path
   5 dispatches. Results are in `results/compare_<map>.md`.
 - 5.6: the frontend is a multi-view dashboard (Impact, Policy, Events and Inspect tabs, pop-outs via `?view=`).
   Chart.js is vendored.
+- Hosting (despite "no deployment" in section 2): `deploy/streamlit_app.py` puts a replay-only copy on Streamlit
+  Community Cloud. It inlines `web/` and the gzipped `recordings/demo.jsonl` into one `st.iframe`, and `app.js` reads
+  `window.CIVIC_PARAMS` before `location.search`. The live sim still needs `server.py` (Streamlit can't host the websocket).
 - Cut: `web/mock_frames.json`, the report card, OSM Amherst, and Plan B.
 
 ## 7. Status

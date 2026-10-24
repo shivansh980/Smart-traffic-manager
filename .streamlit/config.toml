@@ -1,0 +1,7 @@
+# Theme for deploy/streamlit_app.py, matched to web/style.css
+[theme]
+base = "dark"
+backgroundColor = "#090d14"
+secondaryBackgroundColor = "#10161f"
+textColor = "#e8eef8"
+primaryColor = "#2dd4bf"

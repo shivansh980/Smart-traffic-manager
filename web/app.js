@@ -35,7 +35,7 @@ const USD_PER_GAL = 3.5, L_PER_GAL = 3.785, RUSH_HOURS_PER_YEAR = 2 * 250;
 const CHART_EVERY = 5, QUEUE_SMOOTH = 90, WINDOW_KEEP = 130;
 
 const $ = (id) => document.getElementById(id);
-const params = new URLSearchParams(location.search);
+const params = new URLSearchParams(window.CIVIC_PARAMS ?? location.search);   // CIVIC_PARAMS: set by deploy/streamlit_app.py
 const REPLAY = params.get('replay');
 const VIEW = params.get('view');
 const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;

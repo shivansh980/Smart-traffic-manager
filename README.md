@@ -68,6 +68,11 @@ panel. Rebuild the maps with `python scenario/build.py`. Run the tests with `pyt
 writes a deterministic run, and `http://localhost:8000/?replay=/recordings/x.jsonl&t=600` plays it back
 (`&autoplay` starts it). `recordings/demo.jsonl` is a committed grid backup.
 
+**Hosted replay (Streamlit):** `deploy/streamlit_app.py` embeds the dashboard playing `recordings/demo.jsonl`, with
+the benchmark tables below. On Streamlit Community Cloud, set the main file to `deploy/streamlit_app.py`; it installs
+only `deploy/requirements.txt`. Locally: `pip install -r deploy/requirements.txt && streamlit run deploy/streamlit_app.py`.
+Streamlit can't host the live sim's websocket, so the event buttons, sliders and copilot are view-only there.
+
 ## How it works
 
 - **Controller** (`core/controller.py`): weighted max-pressure (Varaiya 2013). Each light scores every green it could show:
