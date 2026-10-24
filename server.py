@@ -65,6 +65,7 @@ class Sim:
         self.runners: dict[str, SumoRunner] = {}
         self.rec = None
         self.inspect_tls: str | None = None
+        self.follow_vid: str | None = None
         self.start()
 
     @property
@@ -121,6 +122,8 @@ class Sim:
         frame = {"type": "frame", "t": t, "scenario": self.scenario, "sims": sims, "events": events}
         if self.inspect_tls:
             frame["inspect"] = {sid: r.inspect(self.inspect_tls) for sid, r in self.runners.items()}
+        if self.follow_vid:
+            frame["follow"] = {"vid": self.follow_vid, **{sid: r.trip(self.follow_vid) for sid, r in self.runners.items()}}
         if self.rec is not None:
             self.rec.write(dumps(frame) + "\n")
         return frame
@@ -140,6 +143,8 @@ class Sim:
             self.pending.append(msg["name"])
         elif kind == "inspect":
             self.inspect_tls = msg.get("tls") or None
+        elif kind == "follow":
+            self.follow_vid = msg.get("vid") or None
         elif kind == "control":
             action = msg.get("action")
             if action == "play" and not self.done:
@@ -158,7 +163,7 @@ class Sim:
             if scen in scenarios():
                 self.playing = False
                 self.stop()
-                self.scenario, self.panes, self.inspect_tls = scen, panes, None
+                self.scenario, self.panes, self.inspect_tls, self.follow_vid = scen, panes, None, None
                 self.start()
                 return True
         return False
@@ -168,7 +173,7 @@ class Sim:
                 "t": self.t, "done": self.done, "scenario": self.scenario, "panes": self.panes,
                 "scenarios": {k: {x: v[x] for x in ("title", "subtitle", "rush", "end")} for k, v in scenarios().items()},
                 "strategies": STRATEGIES, "balanced": BALANCED, "copilot": bool(gemini_key()),
-                "inspect": self.inspect_tls}
+                "inspect": self.inspect_tls, "follow": self.follow_vid}
 
 
 # ------------------------------------------------------------------ policy copilot (Gemini)

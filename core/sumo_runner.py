@@ -145,6 +145,7 @@ class SumoRunner:
         self.heat: dict[str, float] = {}
         self.was_halted: dict[str, bool] = {}
         self.depart: dict[str, float] = {}
+        self.finished: dict[str, tuple[float, float]] = {}   # vid -> (depart, arrive), for follow-a-driver
         self.bus_trips: list[float] = []
         self.amb_n = 0
         self.amb_spawned: dict[str, float] = {}     # vid -> spawn time, while active
@@ -223,7 +224,8 @@ class SumoRunner:
                 self.amb_trips.append(self.amb_last_trip_s)
             if vid.startswith("bus") and vid in self.depart:
                 self.bus_trips.append(self.t - self.depart[vid])
-            self.depart.pop(vid, None)
+            if vid in self.depart:
+                self.finished[vid] = (self.depart.pop(vid), self.t)
             self.was_halted.pop(vid, None)
 
         lanes: dict[str, LaneObs] = {l: LaneObs() for l in self.obs_lanes}
@@ -366,6 +368,13 @@ class SumoRunner:
             out["program"] = self.conn.trafficlight.getProgram(tls_id)
             out["next_switch_s"] = round(self.conn.trafficlight.getNextSwitch(tls_id) - self.t, 1)
         return out
+
+    def trip(self, vid: str) -> dict:
+        """Where one driver is in this city: departure and, once done, arrival time."""
+        if vid in self.finished:
+            d, a = self.finished[vid]
+            return {"depart": d, "arrive": a}
+        return {"depart": self.depart.get(vid), "arrive": None}
 
     def _mark_corridor(self, vid: str, lanes: dict[str, LaneObs]) -> None:
         """Give every light ahead on the ambulance's route its distance to that stop line, so lights

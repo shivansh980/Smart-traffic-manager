@@ -46,7 +46,7 @@ const S = {
   frame: null, dirty: false, playing: false, sps: 10,
   weights: { flow: 1, climate: 1, transit: 0.5, fairness: 0, preempt: true },
   heat: false, heatMax: 10, heatData: {}, win: 'all', snaps: [],
-  follow: null, seen: {}, last: {}, inspect: null, race: null, log: [],
+  follow: null, followTrip: null, inspect: null, race: null, log: [],
   ws: null, lastT: -1,
 };
 
@@ -316,8 +316,7 @@ async function buildPanes(scenario, panes) {
     v.setNet(S.net);
     S.views[sid] = v;
   }
-  for (const sid of panes) { S.seen[sid] = new Map(); S.last[sid] = null; }
-  S.snaps = []; S.race = null; S.follow = null; S.heatData = {}; $('follow').hidden = true;
+  S.snaps = []; S.race = null; S.heatData = {}; if (!params.get("follow")) { S.follow = null; $("follow").hidden = true; }
   buildChart();
   eventLabels();
   renderInspect(null);
@@ -624,44 +623,25 @@ function renderInspect(data) {
 // ================================================================ follow a commuter
 function setFollow(vid) {
   S.follow = vid;
-  for (const sid of S.panes) S.last[sid] = null;
+  send({ type: 'follow', vid });
   S.dirty = true;
-}
-
-function trackVehicles(frame) {
-  for (const sid of S.panes) {
-    const sim = frame.sims[sid];
-    if (!sim) continue;
-    const seen = S.seen[sid];
-    let present = false;
-    for (const v of sim.veh) {
-      if (!seen.has(v[0])) seen.set(v[0], frame.t);
-      if (v[0] === S.follow) present = true;
-    }
-    if (S.follow) {
-      const rec = S.last[sid] || (S.last[sid] = { present: false, end: null });
-      if (present) rec.present = true, rec.end = null;
-      else if (rec.present && rec.end == null) rec.end = frame.t;
-    }
-  }
 }
 
 function renderFollow() {
   const box = $('follow');
   if (!S.follow || !S.frame) { box.hidden = true; return; }
   box.hidden = false;
+  const ft = S.followTrip && S.followTrip.vid === S.follow ? S.followTrip : null;
   const parts = S.panes.map((sid) => {
-    const start = S.seen[sid].get(S.follow);
-    const rec = S.last[sid];
-    let txt = '—';
-    if (start != null) {
-      if (rec && rec.end != null) txt = `🏁 ${mmss(rec.end - start)}`;
-      else txt = `${mmss(S.frame.t - start)}`;
-    }
+    const trip = ft && ft[sid];
+    let txt = '…';
+    if (trip && trip.arrive != null) txt = `🏁 ${mmss(trip.arrive - trip.depart)}`;
+    else if (trip && trip.depart != null) txt = `${mmss(S.frame.t - trip.depart)} <small class="muted">driving</small>`;
+    else if (trip) txt = '<small class="muted">not yet left</small>';
     return `<span style="color:${STRAT[sid].color}">${STRAT[sid].label}</span> <b>${txt}</b>`;
   });
-  box.innerHTML = `<span>🚗 Following one driver</span>${parts.join(' · ')}<span class="fx" title="Stop following">✕</span>`;
-  box.querySelector('.fx').onclick = () => { S.follow = null; box.hidden = true; };
+  box.innerHTML = `<span>🚗 Same driver, same departure</span>${parts.join(' · ')}<span class="fx" title="Stop following">✕</span>`;
+  box.querySelector('.fx').onclick = () => { S.follow = null; send({ type: 'follow', vid: null }); box.hidden = true; };
 }
 
 // ================================================================ chart
@@ -743,7 +723,6 @@ function onFrame(frame, quiet = false) {
   S.snaps.push({ t: frame.t, m: mBySid });
   while (S.snaps.length && frame.t - S.snaps[0].t > WINDOW_KEEP) S.snaps.shift();
   pushChart(frame.t, mBySid);
-  trackVehicles(frame);
   let mx = 0;
   for (const sid of S.panes) {
     const h = frame.sims[sid] && frame.sims[sid].heat;   // sent every 5th frame; keep the latest
@@ -752,6 +731,7 @@ function onFrame(frame, quiet = false) {
   if (mx) S.heatMax = 0.9 * S.heatMax + 0.1 * Math.max(4, mx);
   handleEvents(frame, quiet);   // a replay seek still fills the race and log, just without toasts
   if (frame.inspect) S.pendingInspect = frame.inspect;
+  if (frame.follow) S.followTrip = frame.follow;
 }
 
 async function onState(st) {
@@ -769,6 +749,7 @@ async function onState(st) {
   if (![...lay.options].some((o) => o.value === key)) lay.add(new Option(st.panes.map((p) => STRAT[p].label).join(' vs '), key));
   lay.value = key;
   if (st.scenario !== S.scenario || key !== S.panes.join(',')) await buildPanes(st.scenario, st.panes);
+  if (st.follow !== undefined && !params.get('follow')) S.follow = st.follow;   // after buildPanes, which resets it
   $('copilot-ask').disabled = !st.copilot;
   if (!st.copilot) $('copilot-status').textContent = 'Add GEMINI_API_KEY to .env and restart the server to enable.';
   else if ($('copilot-status').textContent.startsWith('Add')) $('copilot-status').textContent = '';
@@ -823,12 +804,11 @@ function render(now) {
   requestAnimationFrame(render);
 }
 
-let impactAt = 0;
-function renderImpactThrottled() {
-  const now = performance.now();
-  if (now - impactAt < 400) return;
-  impactAt = now;
-  renderImpact();
+let impactAt = -Infinity, impactTimer = null;
+function renderImpactThrottled() {   // at most every 400 ms, and the last update is never dropped
+  const wait = 400 - (performance.now() - impactAt);
+  if (wait <= 0) { impactAt = performance.now(); renderImpact(); return; }
+  if (!impactTimer) impactTimer = setTimeout(() => { impactTimer = null; impactAt = performance.now(); renderImpact(); }, wait);
 }
 
 // ================================================================ ui plumbing
@@ -870,7 +850,7 @@ function wire() {
     };
   }
   for (const b of document.querySelectorAll('[data-pop]')) {
-    b.onclick = () => window.open(`/?view=${b.dataset.pop}`, `civicsignal-${b.dataset.pop}`, 'width=460,height=860');
+    b.onclick = () => window.open(`/?view=${b.dataset.pop}`, `civicsignal-${b.dataset.pop}`, 'width=560,height=860');
   }
   document.addEventListener('keydown', (e) => {
     if (['TEXTAREA', 'SELECT'].includes(e.target.tagName) || (e.target.tagName === 'INPUT' && e.target.type !== 'range')) return;
@@ -879,7 +859,7 @@ function wire() {
     else if (e.key === 's' || e.key === 'S') fireEvent('surge');
     else if (e.key === 'c' || e.key === 'C') fireEvent('crash');
     else if (e.key === 'h' || e.key === 'H') { S.heat = !S.heat; syncControls(); }
-    else if (e.key === 'Escape') { S.follow = null; S.inspect = null; send({ type: 'inspect', tls: null }); renderFollow(); }
+    else if (e.key === 'Escape') { S.follow = null; S.inspect = null; send({ type: 'inspect', tls: null }); send({ type: 'follow', vid: null }); renderFollow(); }
   });
 }
 
@@ -954,6 +934,7 @@ function boot() {
   if (VIEW) { document.body.classList.add('solo'); showTab(VIEW); }
   else if (params.get('tab')) showTab(params.get('tab'));
   if (params.has('heat')) { S.heat = true; syncControls(); }
+  if (params.get('follow')) { S.follow = params.get('follow'); setTimeout(() => send({ type: 'follow', vid: S.follow }), 800); }
   requestAnimationFrame(render);
   if (REPLAY) replay.load(REPLAY); else connect();
 }
