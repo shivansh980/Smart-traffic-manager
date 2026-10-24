@@ -354,6 +354,8 @@ slides, presenting while the builder drives the demo). Nothing on the build path
 - Hosting (despite "no deployment" in section 2): `deploy/streamlit_app.py` puts a replay-only copy on Streamlit
   Community Cloud. It inlines `web/` and the gzipped `recordings/demo.jsonl` into one `st.iframe`, and `app.js` reads
   `window.CIVIC_PARAMS` before `location.search`. The live sim still needs `server.py` (Streamlit can't host the websocket).
+  `deploy/build_site.py` builds that page (Streamlit imports it) and writes it to `docs/index.html` for GitHub Pages or
+  any static host. Rebuild it after re-recording the demo or changing `web/`.
 - Cut: `web/mock_frames.json`, the report card, OSM Amherst, and Plan B.
 
 ## 7. Status

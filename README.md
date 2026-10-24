@@ -73,6 +73,11 @@ the benchmark tables below. On Streamlit Community Cloud, set the main file to `
 only `deploy/requirements.txt`. Locally: `pip install -r deploy/requirements.txt && streamlit run deploy/streamlit_app.py`.
 Streamlit can't host the live sim's websocket, so the event buttons, sliders and copilot are view-only there.
 
+**Static site (any host):** `python deploy/build_site.py` writes the same replay as one self-contained
+`docs/index.html` (about 4 MB, no server, opens straight from disk). To host it on GitHub Pages, commit it and set
+Settings → Pages → *Deploy from a branch*, `main`, `/docs`. Netlify Drop or any static host works too. Rebuild after
+re-recording `recordings/demo.jsonl` or editing `web/`.
+
 ## How it works
 
 - **Controller** (`core/controller.py`): weighted max-pressure (Varaiya 2013). Each light scores every green it could show:
