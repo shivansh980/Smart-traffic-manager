@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CivicSignal</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"><i></i><i></i><i></i></span>
+      <div>
+        <h1>CivicSignal</h1>
+        <p>Adaptive traffic lights the city can steer</p>
+      </div>
+    </div>
+
+    <div class="clock">
+      <span id="phase" class="phase">Off-peak</span>
+      <span class="time"><span id="clock">0:00</span><small> sim time</small></span>
+    </div>
+
+    <div class="transport">
+      <span id="mode" class="mode" hidden>Replay</span>
+      <button id="play" class="btn btn-primary" title="Play / pause (Space)">▶ Play</button>
+      <button id="reset" class="btn" title="Restart both simulations">↺ Reset</button>
+      <label class="speed">Speed
+        <select id="speed">
+          <option value="2">0.2×</option>
+          <option value="5">0.5×</option>
+          <option value="10" selected>1×</option>
+          <option value="20">2×</option>
+          <option value="50">5×</option>
+          <option value="100">10×</option>
+        </select>
+      </label>
+      <span id="conn" class="conn" title="Server connection"></span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="map fixed" aria-label="Fixed-time simulation">
+      <div class="map-head">
+        <h2><span class="swatch"></span>Fixed-time <em>today</em></h2>
+        <span class="map-stat" id="stat-fixed"></span>
+      </div>
+      <div class="map-wrap"><canvas id="cv-fixed"></canvas></div>
+    </section>
+
+    <section class="map adaptive" aria-label="Adaptive simulation">
+      <div class="map-head">
+        <h2><span class="swatch"></span>CivicSignal <em>adaptive</em></h2>
+        <span class="map-stat" id="stat-adaptive"></span>
+      </div>
+      <div class="map-wrap"><canvas id="cv-adaptive"></canvas></div>
+    </section>
+
+    <section class="cards" id="cards" aria-label="Fixed vs adaptive"></section>
+
+    <section class="panel chart-panel">
+      <div class="panel-head">
+        <h3>Wasted idling CO₂ and queues over time</h3>
+        <div class="legend-note"><span class="dash"></span> queue, 90 s average (right axis)</div>
+      </div>
+      <div class="chart-wrap"><canvas id="chart"></canvas></div>
+    </section>
+
+    <section class="panel controls">
+      <div class="panel-head">
+        <h3>What should the city optimize?</h3>
+        <span class="hint">Adaptive side only</span>
+      </div>
+      <div class="presets" id="presets">
+        <button data-preset="commute">Commute</button>
+        <button data-preset="climate">Climate</button>
+        <button data-preset="transit">Transit</button>
+        <button data-preset="fair">Fairness</button>
+      </div>
+      <div class="sliders" id="sliders"></div>
+      <div class="control-foot">
+        <label class="toggle">
+          <input type="checkbox" id="preempt" checked>
+          <span class="track"><span class="knob"></span></span>
+          Emergency preemption
+        </label>
+        <button id="ambulance" class="btn btn-amb" title="Dispatch in both cities (A)">🚑 Dispatch ambulance</button>
+      </div>
+    </section>
+  </main>
+
+  <div id="banner" class="banner" hidden></div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <script src="vendor/chart.umd.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

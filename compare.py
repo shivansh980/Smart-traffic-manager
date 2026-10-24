@@ -19,7 +19,8 @@ from core.types import Weights
 ROOT = Path(__file__).resolve().parent
 CFG = str(ROOT / "scenario" / "sim.sumocfg")
 RESULTS = ROOT / "results"
-AMB_T = 900
+AMB_TIMES = [700, 900, 1100, 1300, 1500]   # several rush-hour dispatches: one is a coin flip on fixed-time phase
+AMB_TIMES_QUICK = [550, 700]
 
 METRICS = [  # key, label, lower is better
     ("delay_s", "Avg delay / vehicle (s, waitingTime)", True),
@@ -29,7 +30,7 @@ METRICS = [  # key, label, lower is better
     ("idle_co2_kg", "Idling CO₂ (kg)", True),
     ("throughput", "Throughput (vehicles arrived)", False),
     ("teleports", "Teleports", True),
-    ("amb_s", "Ambulance trip (s)", True),
+    ("amb_s", "Ambulance trip, mean of dispatches (s)", True),
 ]
 
 
@@ -40,12 +41,13 @@ def controllers() -> dict[str, object]:
 def run_one(name: str, ctrl, seed: int, end: int) -> dict:
     trip = RESULTS / f"tripinfo_{name}_s{seed}.xml"
     r = SumoRunner(f"{name}_s{seed}", CFG, seed, ctrl, tripinfo=str(trip))
-    amb_t = AMB_T if end >= AMB_T + 300 else end - 300
+    amb_times = AMB_TIMES if end >= AMB_TIMES[-1] + 300 else AMB_TIMES_QUICK
     m = {}
     while r.t < end:
-        if r.t == amb_t:
+        if r.t in amb_times:
             r.spawn_ambulance()
         m = r.step()["m"]
+    trips_amb = list(r.amb_trips)
     r.close()
 
     trips = [t for t in ET.parse(trip).getroot().iter("tripinfo") if not t.get("id").startswith("amb")]
@@ -59,7 +61,8 @@ def run_one(name: str, ctrl, seed: int, end: int) -> dict:
         "idle_co2_kg": m["idle_co2_kg"],
         "throughput": m["arrived"],
         "teleports": m["teleports"],
-        "amb_s": m["amb_last_trip_s"],
+        "amb_s": statistics.mean(trips_amb) if trips_amb else None,
+        "amb_trips": trips_amb,
     }
 
 
@@ -100,13 +103,15 @@ def main() -> None:
             runs.setdefault(name, []).append(res)
             print(f"seed {seed} {name:9s} {time.time() - t0:5.1f}s  "
                   + "  ".join(f"{k}={v:.1f}" if isinstance(v, float) else f"{k}={v}" for k, v in res.items()))
+            print(f"{'':25s}ambulance trips: {res['amb_trips']}")
 
     names = list(runs)
     agg = {n: {k: mean_std([r[k] for r in runs[n]]) for k, _, _ in METRICS} for n in names}
 
     lines = [f"# Fixed-time vs CivicSignal (adaptive)\n",
-             f"Seeds: {', '.join(map(str, seeds))} · sim length {end} s · ambulance dispatched at "
-             f"t={AMB_T if end >= AMB_T + 300 else end - 300} s · mean ± std over seeds, all seeds reported\n",
+             f"Seeds: {', '.join(map(str, seeds))} · sim length {end} s · ambulances dispatched at "
+             f"t={', '.join(map(str, AMB_TIMES if end >= AMB_TIMES[-1] + 300 else AMB_TIMES_QUICK))} s "
+             f"(same times in both sims) · mean ± std over seeds, all seeds reported\n",
              "| Metric | " + " | ".join(names) + " | Adaptive vs fixed |",
              "|---|" + "---|" * len(names) + "---|"]
     for k, label, _ in METRICS:
@@ -120,7 +125,11 @@ def main() -> None:
     amb = (f"{a['amb_s'][0] - f['amb_s'][0]:+.0f} s" if f["amb_s"][0] is not None and a["amb_s"][0] is not None
            else "n/a")
     summary = f"**Adaptive vs fixed: {d_delay} delay, {d_co2} CO₂ ({d_idle} idling CO₂), ambulance {amb}**"
-    lines += ["", summary, "", "## Per seed", "", "| Seed | Controller | " + " | ".join(l for _, l, _ in METRICS) + " |",
+    lines += ["", summary, "", "Ambulance trips per dispatch (s):", ""]
+    for i, seed in enumerate(seeds):
+        for n in names:
+            lines.append(f"- seed {seed} {n}: {', '.join(f'{x:.0f}' for x in runs[n][i]['amb_trips'])}")
+    lines += ["", "## Per seed", "", "| Seed | Controller | " + " | ".join(l for _, l, _ in METRICS) + " |",
               "|---|---|" + "---|" * len(METRICS)]
     for i, seed in enumerate(seeds):
         for n in names:

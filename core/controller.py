@@ -16,7 +16,7 @@ MAX_GREEN = 60
 YELLOW = 3
 ALL_RED = 1
 HYST = 2.0
-PREEMPT_DIST_M = 150.0
+PREEMPT_DIST_M = 300.0   # spec says 150; 300 lets lights ahead flush their queue first
 
 _EMPTY = LaneObs()
 

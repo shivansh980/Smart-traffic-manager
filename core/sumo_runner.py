@@ -54,6 +54,7 @@ class SumoRunner:
         assert len(self.tls) == EXPECTED_TLS, f"expected {EXPECTED_TLS} controllable lights, got {len(self.tls)}"
 
         self.obs_lanes = {l for info in self.tls for pair in info.links for l in pair if l}
+        self.links = {info.tls_id: info.links for info in self.tls}
         # incoming lane -> signal indices, per light (for the "sig" frame field)
         self.lane_idx = {info.tls_id: {} for info in self.tls}
         for info in self.tls:
@@ -84,6 +85,7 @@ class SumoRunner:
         self.amb_n = 0
         self.amb_spawned: dict[str, float] = {}     # vid -> spawn time, while active
         self.amb_last_trip_s: Optional[float] = None
+        self.amb_trips: list[float] = []            # every completed ambulance trip, in order
 
     def spawn_ambulance(self) -> None:
         self.amb_n += 1
@@ -104,6 +106,7 @@ class SumoRunner:
         for vid in conn.simulation.getArrivedIDList():
             if vid in self.amb_spawned:
                 self.amb_last_trip_s = self.t - self.amb_spawned.pop(vid)
+                self.amb_trips.append(self.amb_last_trip_s)
 
         lanes: dict[str, LaneObs] = {l: LaneObs() for l in self.obs_lanes}
         veh, halted_n, co2, idle_co2, max_wait = [], 0, 0.0, 0.0, 0.0
@@ -121,6 +124,8 @@ class SumoRunner:
             veh.append([vid, round(x, 1), round(y, 1), round(v[tc.VAR_ANGLE], 1), KIND.get(vtype, "c"), int(halted)])
 
             lane = v[tc.VAR_LANE_ID]
+            if vtype == "ambulance" and self.controller is not None:
+                self._mark_corridor(vid, lanes)
             o = lanes.get(lane)
             if o is None:
                 continue
@@ -174,6 +179,17 @@ class SumoRunner:
             "tls_wait": {k: round(v / self.steps, 2) for k, v in self.tls_wait_sum.items()},
         }
         return {"veh": veh, "sig": sig, "m": m}
+
+    def _mark_corridor(self, vid: str, lanes: dict[str, LaneObs]) -> None:
+        """Give every light ahead on the ambulance's route its distance to that stop line, so lights
+        can clear their queues before it arrives rather than only the one it is approaching."""
+        for tls_id, idx, dist, _ in self.conn.vehicle.getNextTLS(vid):
+            links = self.links.get(tls_id)
+            if links is None:
+                continue
+            o = lanes.get(links[idx][0])
+            if o is not None and (o.emergency_dist_m is None or dist < o.emergency_dist_m):
+                o.emergency_dist_m = dist
 
     def close(self) -> None:
         try:
