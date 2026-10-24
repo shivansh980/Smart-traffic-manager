@@ -6,3 +6,8 @@ __pycache__/
 recordings/*.jsonl
 !recordings/demo.jsonl
 results/tripinfo_*.xml
+
+# secrets (repo is public)
+.env
+.env.*
+*.key
