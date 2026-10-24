@@ -1,0 +1,128 @@
+<additional>
+  <tlLogic id="A0" type="actuated" programID="actuated" offset="0">
+    <param key="max-gap" value="3.0" />
+    <param key="detector-gap" value="2.0" />
+    <phase duration="42" minDur="6" maxDur="55" state="GGGggrrrrrGGGggrrrrr" />
+    <phase duration="3" state="yyyyyrrrrryyyyyrrrrr" />
+    <phase duration="42" minDur="6" maxDur="55" state="rrrrrGGGggrrrrrGGGgg" />
+    <phase duration="3" state="rrrrryyyyyrrrrryyyyy" />
+  </tlLogic>
+  <tlLogic id="A0" type="static" programID="greenwave" offset="20">
+    <phase duration="52" state="rrrrrGGGggrrrrrGGGgg" />
+    <phase duration="3" state="rrrrryyyyyrrrrryyyyy" />
+    <phase duration="32" state="GGGggrrrrrGGGggrrrrr" />
+    <phase duration="3" state="yyyyyrrrrryyyyyrrrrr" />
+  </tlLogic>
+  <tlLogic id="A1" type="actuated" programID="actuated" offset="0">
+    <param key="max-gap" value="3.0" />
+    <param key="detector-gap" value="2.0" />
+    <phase duration="42" minDur="6" maxDur="55" state="GGGggrrrrrGGGggrrrrr" />
+    <phase duration="3" state="yyyyyrrrrryyyyyrrrrr" />
+    <phase duration="42" minDur="6" maxDur="55" state="rrrrrGGGggrrrrrGGGgg" />
+    <phase duration="3" state="rrrrryyyyyrrrrryyyyy" />
+  </tlLogic>
+  <tlLogic id="A1" type="static" programID="greenwave" offset="20">
+    <phase duration="52" state="rrrrrGGGggrrrrrGGGgg" />
+    <phase duration="3" state="rrrrryyyyyrrrrryyyyy" />
+    <phase duration="32" state="GGGggrrrrrGGGggrrrrr" />
+    <phase duration="3" state="yyyyyrrrrryyyyyrrrrr" />
+  </tlLogic>
+  <tlLogic id="A2" type="actuated" programID="actuated" offset="0">
+    <param key="max-gap" value="3.0" />
+    <param key="detector-gap" value="2.0" />
+    <phase duration="42" minDur="6" maxDur="55" state="GGGggrrrrrGGGggrrrrr" />
+    <phase duration="3" state="yyyyyrrrrryyyyyrrrrr" />
+    <phase duration="42" minDur="6" maxDur="55" state="rrrrrGGGggrrrrrGGGgg" />
+    <phase duration="3" state="rrrrryyyyyrrrrryyyyy" />
+  </tlLogic>
+  <tlLogic id="A2" type="static" programID="greenwave" offset="20">
+    <phase duration="52" state="rrrrrGGGggrrrrrGGGgg" />
+    <phase duration="3" state="rrrrryyyyyrrrrryyyyy" />
+    <phase duration="32" state="GGGggrrrrrGGGggrrrrr" />
+    <phase duration="3" state="yyyyyrrrrryyyyyrrrrr" />
+  </tlLogic>
+  <tlLogic id="B0" type="actuated" programID="actuated" offset="0">
+    <param key="max-gap" value="3.0" />
+    <param key="detector-gap" value="2.0" />
+    <phase duration="42" minDur="6" maxDur="55" state="GGGggrrrrrGGGggrrrrr" />
+    <phase duration="3" state="yyyyyrrrrryyyyyrrrrr" />
+    <phase duration="42" minDur="6" maxDur="55" state="rrrrrGGGggrrrrrGGGgg" />
+    <phase duration="3" state="rrrrryyyyyrrrrryyyyy" />
+  </tlLogic>
+  <tlLogic id="B0" type="static" programID="greenwave" offset="40">
+    <phase duration="52" state="rrrrrGGGggrrrrrGGGgg" />
+    <phase duration="3" state="rrrrryyyyyrrrrryyyyy" />
+    <phase duration="32" state="GGGggrrrrrGGGggrrrrr" />
+    <phase duration="3" state="yyyyyrrrrryyyyyrrrrr" />
+  </tlLogic>
+  <tlLogic id="B1" type="actuated" programID="actuated" offset="0">
+    <param key="max-gap" value="3.0" />
+    <param key="detector-gap" value="2.0" />
+    <phase duration="42" minDur="6" maxDur="55" state="GGGggrrrrrGGGggrrrrr" />
+    <phase duration="3" state="yyyyyrrrrryyyyyrrrrr" />
+    <phase duration="42" minDur="6" maxDur="55" state="rrrrrGGGggrrrrrGGGgg" />
+    <phase duration="3" state="rrrrryyyyyrrrrryyyyy" />
+  </tlLogic>
+  <tlLogic id="B1" type="static" programID="greenwave" offset="40">
+    <phase duration="52" state="rrrrrGGGggrrrrrGGGgg" />
+    <phase duration="3" state="rrrrryyyyyrrrrryyyyy" />
+    <phase duration="32" state="GGGggrrrrrGGGggrrrrr" />
+    <phase duration="3" state="yyyyyrrrrryyyyyrrrrr" />
+  </tlLogic>
+  <tlLogic id="B2" type="actuated" programID="actuated" offset="0">
+    <param key="max-gap" value="3.0" />
+    <param key="detector-gap" value="2.0" />
+    <phase duration="42" minDur="6" maxDur="55" state="GGGggrrrrrGGGggrrrrr" />
+    <phase duration="3" state="yyyyyrrrrryyyyyrrrrr" />
+    <phase duration="42" minDur="6" maxDur="55" state="rrrrrGGGggrrrrrGGGgg" />
+    <phase duration="3" state="rrrrryyyyyrrrrryyyyy" />
+  </tlLogic>
+  <tlLogic id="B2" type="static" programID="greenwave" offset="40">
+    <phase duration="52" state="rrrrrGGGggrrrrrGGGgg" />
+    <phase duration="3" state="rrrrryyyyyrrrrryyyyy" />
+    <phase duration="32" state="GGGggrrrrrGGGggrrrrr" />
+    <phase duration="3" state="yyyyyrrrrryyyyyrrrrr" />
+  </tlLogic>
+  <tlLogic id="C0" type="actuated" programID="actuated" offset="0">
+    <param key="max-gap" value="3.0" />
+    <param key="detector-gap" value="2.0" />
+    <phase duration="42" minDur="6" maxDur="55" state="GGGggrrrrrGGGggrrrrr" />
+    <phase duration="3" state="yyyyyrrrrryyyyyrrrrr" />
+    <phase duration="42" minDur="6" maxDur="55" state="rrrrrGGGggrrrrrGGGgg" />
+    <phase duration="3" state="rrrrryyyyyrrrrryyyyy" />
+  </tlLogic>
+  <tlLogic id="C0" type="static" programID="greenwave" offset="60">
+    <phase duration="52" state="rrrrrGGGggrrrrrGGGgg" />
+    <phase duration="3" state="rrrrryyyyyrrrrryyyyy" />
+    <phase duration="32" state="GGGggrrrrrGGGggrrrrr" />
+    <phase duration="3" state="yyyyyrrrrryyyyyrrrrr" />
+  </tlLogic>
+  <tlLogic id="C1" type="actuated" programID="actuated" offset="0">
+    <param key="max-gap" value="3.0" />
+    <param key="detector-gap" value="2.0" />
+    <phase duration="42" minDur="6" maxDur="55" state="GGGggrrrrrGGGggrrrrr" />
+    <phase duration="3" state="yyyyyrrrrryyyyyrrrrr" />
+    <phase duration="42" minDur="6" maxDur="55" state="rrrrrGGGggrrrrrGGGgg" />
+    <phase duration="3" state="rrrrryyyyyrrrrryyyyy" />
+  </tlLogic>
+  <tlLogic id="C1" type="static" programID="greenwave" offset="60">
+    <phase duration="52" state="rrrrrGGGggrrrrrGGGgg" />
+    <phase duration="3" state="rrrrryyyyyrrrrryyyyy" />
+    <phase duration="32" state="GGGggrrrrrGGGggrrrrr" />
+    <phase duration="3" state="yyyyyrrrrryyyyyrrrrr" />
+  </tlLogic>
+  <tlLogic id="C2" type="actuated" programID="actuated" offset="0">
+    <param key="max-gap" value="3.0" />
+    <param key="detector-gap" value="2.0" />
+    <phase duration="42" minDur="6" maxDur="55" state="GGGggrrrrrGGGggrrrrr" />
+    <phase duration="3" state="yyyyyrrrrryyyyyrrrrr" />
+    <phase duration="42" minDur="6" maxDur="55" state="rrrrrGGGggrrrrrGGGgg" />
+    <phase duration="3" state="rrrrryyyyyrrrrryyyyy" />
+  </tlLogic>
+  <tlLogic id="C2" type="static" programID="greenwave" offset="60">
+    <phase duration="52" state="rrrrrGGGggrrrrrGGGgg" />
+    <phase duration="3" state="rrrrryyyyyrrrrryyyyy" />
+    <phase duration="32" state="GGGggrrrrrGGGggrrrrr" />
+    <phase duration="3" state="yyyyyrrrrryyyyyrrrrr" />
+  </tlLogic>
+</additional>

@@ -1,0 +1,76 @@
+{
+  "id": "midtown",
+  "title": "Midtown Manhattan",
+  "subtitle": "6th\u20133rd Ave \u00b7 47th\u201355th St \u00b7 54 signals",
+  "cfg": "scenario/midtown/sim.sumocfg",
+  "rush": [
+    600,
+    1800
+  ],
+  "end": 2400,
+  "rotate_deg": 28.29,
+  "major_label": "avenues",
+  "expected_tls": 54,
+  "ambulance": {
+    "route": "amb_route",
+    "label": "Ambulance \u2192 Mount Sinai West"
+  },
+  "surge": {
+    "label": "Radio City show lets out",
+    "from": [
+      "1211049194#0",
+      "420908138#0",
+      "464516471#16",
+      "5670867#0"
+    ],
+    "to": [
+      "46521994#0",
+      "226041006#3",
+      "1531577066#0",
+      "46522003#0",
+      "710571389#0",
+      "710571388#0"
+    ],
+    "n": 160,
+    "over_s": 240
+  },
+  "crash": {
+    "label": "Crash on 5th Ave at St. Patrick's",
+    "edge": "1352944235#0",
+    "lanes": [
+      0,
+      1
+    ],
+    "pos": 39.3,
+    "duration": 300
+  },
+  "bus": "5th Ave & Madison buses every 2.5 min",
+  "landmarks": [
+    {
+      "text": "Radio City",
+      "x": 1016.4,
+      "y": 1064.9
+    },
+    {
+      "text": "St. Patrick's",
+      "x": 1289.2,
+      "y": 916.4
+    },
+    {
+      "text": "Rockefeller Ctr",
+      "x": 978.0,
+      "y": 993.9
+    },
+    {
+      "text": "MoMA",
+      "x": 1128.3,
+      "y": 1273.1
+    },
+    {
+      "text": "Grand Central \u2193",
+      "x": 1449.7,
+      "y": 559.3
+    }
+  ],
+  "attribution": "Map data \u00a9 OpenStreetMap contributors (ODbL)"
+}

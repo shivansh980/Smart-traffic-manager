@@ -49,6 +49,7 @@ class _Light:
     since: float = 0.0
     target: Optional[str] = None
     shown: str = ""
+    reason: str = "start"                     # why the light shows what it shows (for the inspector)
 
 
 @dataclass
@@ -67,15 +68,33 @@ class WeightedMaxPressure:
         self.lights[info.tls_id] = _Light(info, pairs, in_lanes, all_in, cur, shown=cur)
 
     def score(self, tls_id: str, g: str, lanes: dict[str, LaneObs]) -> float:
+        return sum(self.terms(tls_id, g, lanes).values())
+
+    def terms(self, tls_id: str, g: str, lanes: dict[str, LaneObs]) -> dict[str, float]:
+        """The score of green state g, split into the city's four priorities."""
         light, w = self.lights[tls_id], self.weights
-        s = 0.0
+        flow = climate = transit = fairness = 0.0
         for a, b in light.pairs[g]:
-            s += w.flow * (lanes.get(a, _EMPTY).halting - lanes.get(b, _EMPTY).halting)
+            flow += w.flow * (lanes.get(a, _EMPTY).halting - lanes.get(b, _EMPTY).halting)
         for a in light.in_lanes[g]:
             o = lanes.get(a, _EMPTY)
-            s += w.climate * (CLIMATE_IDLE_K * o.co2_mg_s / 1000 + CLIMATE_STOP_K * o.approaching)
-            s += w.transit * 5 * o.buses + w.fairness * o.max_wait_s / 30
-        return s
+            climate += w.climate * (CLIMATE_IDLE_K * o.co2_mg_s / 1000 + CLIMATE_STOP_K * o.approaching)
+            transit += w.transit * 5 * o.buses
+            fairness += w.fairness * o.max_wait_s / 30
+        return {"flow": flow, "climate": climate, "transit": transit, "fairness": fairness}
+
+    def explain(self, tls_id: str, lanes: dict[str, LaneObs], edge_names: dict[str, str] | None = None) -> dict:
+        light = self.lights[tls_id]
+        names = edge_names or {}
+        options = []
+        for g in light.info.green_states:
+            edges = list(dict.fromkeys(l.rsplit("_", 1)[0] for l in light.in_lanes[g]))
+            t = self.terms(tls_id, g, lanes)
+            options.append({"state": g, "serves": list(dict.fromkeys(names.get(e, e) for e in edges)),
+                            "terms": {k: round(v, 2) for k, v in t.items()}, "total": round(sum(t.values()), 2),
+                            "current": g == light.cur, "target": g == light.target})
+        return {"mode": light.mode, "reason": light.reason, "options": options,
+                "min_green": MIN_GREEN, "max_green": MAX_GREEN, "hyst": HYST}
 
     def _preempt_target(self, light: _Light, lanes: dict[str, LaneObs]) -> Optional[str]:
         """Green state serving the in-lane with the nearest emergency vehicle within range, if any."""
@@ -112,7 +131,7 @@ class WeightedMaxPressure:
                 light.target = pre   # still goes through yellow and all-red
             if t - light.since < YELLOW:
                 return light.shown
-            light.mode, light.since = "allred", t
+            light.mode, light.since, light.reason = "allred", t, "all-red clearance"
             return all_red_state(light.shown)
 
         if light.mode == "allred":
@@ -121,15 +140,19 @@ class WeightedMaxPressure:
             if t - light.since < ALL_RED:
                 return light.shown
             light.mode, light.since, light.cur, light.target = "green", t, light.target, None
+            light.reason = "new green"
             return light.cur
 
         if pre is not None:
             if pre == light.cur:
+                light.reason = "holding green for ambulance"
                 return light.cur     # hold the green for the emergency vehicle, even past max-green
+            light.reason = "ambulance approaching: clearing its lane"
             return self._begin_change(light, pre, t)
 
         t_green = t - light.since
         if t_green < MIN_GREEN:
+            light.reason = f"minimum green ({MIN_GREEN} s)"
             return light.cur
 
         tid = light.info.tls_id
@@ -137,7 +160,10 @@ class WeightedMaxPressure:
         best = ranked[0]
         if t_green >= MAX_GREEN:
             nxt = ranked[1] if best == light.cur and len(ranked) > 1 else best
+            light.reason = f"maximum green ({MAX_GREEN} s): rotating so nobody starves"
             return self._begin_change(light, nxt, t) if nxt != light.cur else light.cur
         if best != light.cur and self.score(tid, best, lanes) > self.score(tid, light.cur, lanes) + HYST:
+            light.reason = "another direction scores higher: switching"
             return self._begin_change(light, best, t)
+        light.reason = "current green still scores best" if best == light.cur else f"gap below hysteresis ({HYST})"
         return light.cur

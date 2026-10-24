@@ -1,0 +1,45 @@
+{
+  "id": "grid",
+  "title": "Demo grid",
+  "subtitle": "3\u00d73 downtown grid \u00b7 9 signals",
+  "cfg": "scenario/grid/sim.sumocfg",
+  "rush": [
+    600,
+    1800
+  ],
+  "end": 2400,
+  "rotate_deg": 0,
+  "major_label": "east\u2013west",
+  "expected_tls": 9,
+  "ambulance": {
+    "route": "amb_route",
+    "label": "Ambulance across downtown"
+  },
+  "surge": {
+    "label": "Stadium lets out",
+    "from": [
+      "bottom0A0",
+      "left0A0"
+    ],
+    "to": [
+      "C1right1",
+      "C2right2",
+      "B2top1",
+      "C2top2"
+    ],
+    "n": 120,
+    "over_s": 240
+  },
+  "crash": {
+    "label": "Crash on the main avenue",
+    "edge": "B1C1",
+    "lanes": [
+      0,
+      1
+    ],
+    "pos": 120,
+    "duration": 300
+  },
+  "bus": "Crosstown bus every 2 min",
+  "landmarks": []
+}
